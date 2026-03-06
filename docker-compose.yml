@@ -1,4 +1,17 @@
-version: "3.9"
+# ============================================
+# VideoPipe — Docker Compose
+# ============================================
+# 3 containers: web (FastAPI), worker (Celery GPU), redis (broker)
+#
+# GPU Configuration:
+#   - Uses NVIDIA Container Toolkit for GPU passthrough
+#   - Works with any NVIDIA GPU (RTX 3090 24GB, RTX 5090 32GB, etc.)
+#   - GPU is only assigned to the worker (where AI inference runs)
+#   - To disable GPU (CPU-only mode): remove the deploy.resources block from worker
+#
+# Volumes:
+#   - Mount NAS directories as additional volumes to access footage in-place
+#   - Example: add "- /mnt/nas/gopro:/mnt/nas/gopro:ro" under web & worker volumes
 
 services:
   web:
@@ -8,57 +21,70 @@ services:
       - "8000:8000"
     volumes:
       - .:/app
-      - ./data/uploads:/app/data/uploads
-      - ./data/outputs:/app/data/outputs
-      - ./data/models:/app/data/models
-      - ./data/db:/app/data/db
+      - pipeline-uploads:/app/data/uploads
+      - pipeline-outputs:/app/data/outputs
+      - pipeline-models:/app/data/models
+      - pipeline-db:/app/data/db
     environment:
-      - DATABASE_URL=sqlite:///data/db/pipeline.db
+      - DATABASE_URL=sqlite:////app/data/db/pipeline.db
       - REDIS_URL=redis://redis:6379/0
       - UPLOAD_DIR=/app/data/uploads
       - OUTPUT_DIR=/app/data/outputs
       - MODEL_CACHE_DIR=/app/data/models
     depends_on:
-      - redis
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
+      redis:
+        condition: service_started
+    restart: unless-stopped
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:8000/" ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
 
   worker:
     build: .
     command: celery -A app.workers.celery_app worker --loglevel=info --concurrency=2 -Q pipeline,celery
     volumes:
       - .:/app
-      - ./data/uploads:/app/data/uploads
-      - ./data/outputs:/app/data/outputs
-      - ./data/models:/app/data/models
-      - ./data/db:/app/data/db
+      - pipeline-uploads:/app/data/uploads
+      - pipeline-outputs:/app/data/outputs
+      - pipeline-models:/app/data/models
+      - pipeline-db:/app/data/db
     environment:
-      - DATABASE_URL=sqlite:///data/db/pipeline.db
+      - DATABASE_URL=sqlite:////app/data/db/pipeline.db
       - REDIS_URL=redis://redis:6379/0
       - UPLOAD_DIR=/app/data/uploads
       - OUTPUT_DIR=/app/data/outputs
       - MODEL_CACHE_DIR=/app/data/models
+      - NVIDIA_VISIBLE_DEVICES=all
     depends_on:
-      - redis
+      redis:
+        condition: service_started
+    restart: unless-stopped
     deploy:
       resources:
         reservations:
           devices:
             - driver: nvidia
               count: 1
-              capabilities: [gpu]
+              capabilities: [ gpu ]
 
   redis:
     image: redis:7-alpine
     ports:
       - "6379:6379"
     volumes:
-      - redis_data:/data
+      - redis-data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: [ "CMD", "redis-cli", "ping" ]
+      interval: 10s
+      timeout: 3s
+      retries: 5
 
 volumes:
-  redis_data:
+  pipeline-uploads:
+  pipeline-outputs:
+  pipeline-models:
+  pipeline-db:
+  redis-data:

@@ -1,0 +1,7 @@
+# GPU/AI packages — installed separately for proper CUDA support
+# These require PyTorch with CUDA, so we install torch first then the rest
+torch==2.5.1
+torchvision==0.20.1
+open-clip-torch==2.29.0
+ultralytics==8.3.57
+openai-whisper==20240930
