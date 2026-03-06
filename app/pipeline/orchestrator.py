@@ -75,21 +75,52 @@ def run_pipeline(self, job_id: str):
         logger.info(f"Detected {clip_count} scenes for job {job_id}")
 
         # ---- Stage 3: Analysis ----
-        _update_job_status(job_id, JobStatus.ANALYZING, progress_pct=30.0)
+        # Each module loads/unloads its GPU model sequentially to manage VRAM
+
+        # 3a: CLIP Activity Tagging
+        _update_job_status(job_id, JobStatus.ANALYZING, progress_pct=25.0)
         _update_task_meta(self, {
             "stage": "analyzing",
             "sub_stage": "clip_tagging",
-            "message": "Running AI analysis on clips...",
-            "progress_pct": 30.0,
+            "message": "Running CLIP activity tagging...",
+            "progress_pct": 25.0,
         })
 
         from app.pipeline.analysis.clip_tagger import run_clip_tagging
         run_clip_tagging(job_id, progress_callback=lambda info: _update_task_meta(self, info))
 
-        # Future: YOLOv8, Whisper, Motion analysis would run here
-        # from app.pipeline.analysis.object_detect import run_object_detection
-        # from app.pipeline.analysis.transcribe import run_transcription
-        # from app.pipeline.analysis.motion import run_motion_analysis
+        # 3b: YOLOv8 Object Detection
+        _update_task_meta(self, {
+            "stage": "analyzing",
+            "sub_stage": "object_detection",
+            "message": "Running YOLOv8 object detection...",
+            "progress_pct": 40.0,
+        })
+
+        from app.pipeline.analysis.object_detect import detect_objects_for_job
+        detect_objects_for_job(job_id)
+
+        # 3c: Whisper Transcription
+        _update_task_meta(self, {
+            "stage": "analyzing",
+            "sub_stage": "transcription",
+            "message": "Running Whisper speech transcription...",
+            "progress_pct": 55.0,
+        })
+
+        from app.pipeline.analysis.transcribe import transcribe_clips_for_job
+        transcribe_clips_for_job(job_id)
+
+        # 3d: Motion Analysis (CPU-only, runs fast)
+        _update_task_meta(self, {
+            "stage": "analyzing",
+            "sub_stage": "motion",
+            "message": "Analyzing motion intensity...",
+            "progress_pct": 65.0,
+        })
+
+        from app.pipeline.analysis.motion import analyze_motion_for_job
+        analyze_motion_for_job(job_id)
 
         # ---- Stage 4: Scoring ----
         _update_job_status(job_id, JobStatus.SCORING, progress_pct=75.0)

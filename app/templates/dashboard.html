@@ -1,9 +1,7 @@
 {% extends "base.html" %}
-
 {% block title %}Dashboard{% endblock %}
 {% block nav_dashboard %}active{% endblock %}
 {% block page_title %}Dashboard{% endblock %}
-
 {% block header_actions %}
 <a href="/upload" class="btn btn-primary">
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -15,157 +13,238 @@
 {% endblock %}
 
 {% block content %}
-<!-- Quick Stats -->
+<!-- Stats Row -->
 <div class="stats-grid" id="stats-grid">
     <div class="stat-card">
-        <div class="stat-icon" style="--accent: var(--color-cyan)">
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z" />
-                <circle cx="12" cy="13" r="3" />
-            </svg>
-        </div>
-        <div class="stat-info">
-            <span class="stat-value" id="stat-videos">—</span>
-            <span class="stat-label">Videos Processed</span>
-        </div>
+        <div class="stat-icon" style="--accent: var(--color-cyan-dim)"><svg width="22" height="22" viewBox="0 0 24 24"
+                fill="none" stroke="var(--color-cyan)" stroke-width="2">
+                <polygon points="23 7 16 12 23 17 23 7" />
+                <rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
+            </svg></div>
+        <div><span class="stat-value" id="stat-videos">—</span><span class="stat-label">Videos Processed</span></div>
     </div>
     <div class="stat-card">
-        <div class="stat-icon" style="--accent: var(--color-purple)">
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18" />
-                <line x1="7" y1="2" x2="7" y2="22" />
-                <line x1="17" y1="2" x2="17" y2="22" />
-                <line x1="2" y1="12" x2="22" y2="12" />
-                <line x1="2" y1="7" x2="22" y2="7" />
-                <line x1="2" y1="17" x2="22" y2="17" />
-            </svg>
-        </div>
-        <div class="stat-info">
-            <span class="stat-value" id="stat-clips">—</span>
-            <span class="stat-label">Clips Generated</span>
-        </div>
+        <div class="stat-icon" style="--accent: var(--color-purple-dim)"><svg width="22" height="22" viewBox="0 0 24 24"
+                fill="none" stroke="var(--color-purple)" stroke-width="2">
+                <rect x="2" y="2" width="20" height="20" rx="5" ry="5" />
+                <path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z" />
+            </svg></div>
+        <div><span class="stat-value" id="stat-clips">—</span><span class="stat-label">Clips Generated</span></div>
     </div>
     <div class="stat-card">
-        <div class="stat-icon" style="--accent: var(--color-green)">
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
-            </svg>
-        </div>
-        <div class="stat-info">
-            <span class="stat-value" id="stat-top-score">—</span>
-            <span class="stat-label">Best Score</span>
-        </div>
+        <div class="stat-icon" style="--accent: var(--color-green-dim)"><svg width="22" height="22" viewBox="0 0 24 24"
+                fill="none" stroke="var(--color-green)" stroke-width="2">
+                <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
+                <polyline points="22 4 12 14.01 9 11.01" />
+            </svg></div>
+        <div><span class="stat-value" id="stat-score">—</span><span class="stat-label">Best Score</span></div>
     </div>
     <div class="stat-card">
-        <div class="stat-icon" style="--accent: var(--color-orange)">
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <circle cx="12" cy="12" r="10" />
-                <polyline points="12 6 12 12 16 14" />
-            </svg>
-        </div>
-        <div class="stat-info">
-            <span class="stat-value" id="stat-jobs">—</span>
-            <span class="stat-label">Total Jobs</span>
-        </div>
+        <div class="stat-icon" style="--accent: var(--color-orange-dim)"><svg width="22" height="22" viewBox="0 0 24 24"
+                fill="none" stroke="var(--color-orange)" stroke-width="2">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                <polyline points="14 2 14 8 20 8" />
+            </svg></div>
+        <div><span class="stat-value" id="stat-jobs">—</span><span class="stat-label">Total Jobs</span></div>
     </div>
 </div>
 
-<!-- Job List -->
-<div class="section">
-    <div class="section-header">
-        <h2>Recent Jobs</h2>
-    </div>
-    <div class="jobs-list" id="jobs-list">
-        <div class="empty-state" id="empty-state">
-            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"
-                opacity="0.4">
-                <polygon points="23 7 16 12 23 17 23 7" />
-                <rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
-            </svg>
-            <p>No jobs yet. Create your first job to get started!</p>
-            <a href="/upload" class="btn btn-primary">Create Job</a>
-        </div>
+<!-- Active Jobs (with progress) -->
+<div class="section-header" id="active-section" style="display:none">
+    <h2>🔥 Active Jobs</h2>
+</div>
+<div class="active-jobs-list" id="active-jobs"></div>
+
+<!-- All Jobs -->
+<div class="section-header" style="display:flex; align-items:center; justify-content:space-between; margin-top:24px;">
+    <h2>All Jobs</h2>
+    <button class="btn btn-sm btn-secondary" onclick="loadDashboard()" title="Refresh">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="23 4 23 10 17 10" />
+            <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
+        </svg>
+        Refresh
+    </button>
+</div>
+<div class="jobs-list" id="jobs-list">
+    <div class="empty-state">
+        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"
+            style="opacity:0.3">
+            <polygon points="23 7 16 12 23 17 23 7" />
+            <rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
+        </svg>
+        <p>No jobs yet. Create your first job to get started!</p>
+        <a href="/upload" class="btn btn-primary">Create Job</a>
     </div>
 </div>
 {% endblock %}
 
 {% block scripts %}
 <script>
+    const STATUS_LABELS = {
+        pending: 'Pending', ingesting: 'Ingesting', detecting_scenes: 'Detecting Scenes',
+        analyzing: 'Analyzing', scoring: 'Scoring', assembling: 'Assembling',
+        enhancing: 'Enhancing', complete: 'Complete', complete_with_errors: 'Done (errors)',
+        failed: 'Failed', cancelled: 'Cancelled'
+    };
+    const ACTIVE_STATUSES = ['ingesting', 'detecting_scenes', 'analyzing', 'scoring', 'assembling', 'enhancing'];
+
+    let refreshInterval = null;
+
     document.addEventListener('DOMContentLoaded', () => {
         loadDashboard();
-        // Auto-refresh every 10 seconds
-        setInterval(loadDashboard, 10000);
+        // Auto-refresh every 5 seconds
+        refreshInterval = setInterval(loadDashboard, 5000);
     });
 
     async function loadDashboard() {
         try {
-            const resp = await fetch('/api/jobs');
-            const data = await resp.json();
-            const jobs = data.jobs || [];
-
-            // Update stats
-            let totalVideos = 0, totalClips = 0, topScore = 0;
-            jobs.forEach(j => {
-                totalVideos += j.video_count || 0;
-                totalClips += j.clip_count || 0;
-                if (j.top_score && j.top_score > topScore) topScore = j.top_score;
-            });
-
-            document.getElementById('stat-videos').textContent = totalVideos;
-            document.getElementById('stat-clips').textContent = totalClips;
-            document.getElementById('stat-top-score').textContent = topScore > 0 ? topScore.toFixed(1) : '—';
-            document.getElementById('stat-jobs').textContent = jobs.length;
-
-            // Render job list
-            const list = document.getElementById('jobs-list');
-            const empty = document.getElementById('empty-state');
-
-            if (jobs.length === 0) {
-                empty.style.display = 'flex';
-                return;
-            }
-
-            empty.style.display = 'none';
-            let html = '';
-            jobs.forEach(job => {
-                const statusClass = `status-${job.status}`;
-                const statusLabel = job.status.replace(/_/g, ' ');
-                const date = new Date(job.created_at).toLocaleDateString('en-US', {
-                    month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
-                });
-
-                html += `
-            <a href="/jobs/${job.id}" class="job-card" id="job-${job.id}">
-                <div class="job-card-main">
-                    <div class="job-info">
-                        <h3 class="job-name">${escapeHtml(job.name)}</h3>
-                        <span class="job-date">${date}</span>
-                    </div>
-                    <div class="job-meta">
-                        <span class="badge ${statusClass}">${statusLabel}</span>
-                        <span class="job-stat">${job.video_count} videos</span>
-                        <span class="job-stat">${job.clip_count} clips</span>
-                        ${job.top_score ? `<span class="job-stat score">★ ${job.top_score.toFixed(1)}</span>` : ''}
-                    </div>
-                </div>
-                ${job.status !== 'complete' && job.status !== 'failed' && job.status !== 'pending' ? `
-                <div class="job-progress">
-                    <div class="progress-bar">
-                        <div class="progress-fill" style="width: ${job.progress_pct}%"></div>
-                    </div>
-                    <span class="progress-text">${job.progress_pct.toFixed(0)}%</span>
-                </div>` : ''}
-            </a>`;
-            });
-
-            // Remove empty state and set HTML (keep empty state element)
-            const cards = list.querySelectorAll('.job-card');
-            cards.forEach(c => c.remove());
-            list.insertAdjacentHTML('beforeend', html);
-
-        } catch (err) {
-            console.error('Failed to load dashboard:', err);
+            const r = await fetch('/api/jobs');
+            if (!r.ok) return;
+            const data = await r.json();
+            const jobs = data.jobs || data || [];
+            renderStats(jobs);
+            renderActiveJobs(jobs);
+            renderAllJobs(jobs);
+        } catch (e) {
+            console.error('Dashboard fetch error:', e);
         }
     }
+
+    function renderStats(jobs) {
+        const complete = jobs.filter(j => j.status === 'complete' || j.status === 'complete_with_errors');
+        const totalVideos = jobs.reduce((sum, j) => sum + (j.video_count || 0), 0);
+        const totalClips = jobs.reduce((sum, j) => sum + (j.clip_count || 0), 0);
+
+        const topScore = jobs.reduce((best, j) => Math.max(best, j.top_score || 0), 0);
+
+        document.getElementById('stat-jobs').textContent = jobs.length;
+        document.getElementById('stat-videos').textContent = totalVideos;
+        document.getElementById('stat-clips').textContent = totalClips;
+        document.getElementById('stat-score').textContent = topScore > 0 ? topScore.toFixed(0) : '—';
+    }
+
+    function renderActiveJobs(jobs) {
+        const active = jobs.filter(j => ACTIVE_STATUSES.includes(j.status));
+        const section = document.getElementById('active-section');
+        const container = document.getElementById('active-jobs');
+
+        if (!active.length) {
+            section.style.display = 'none';
+            container.innerHTML = '';
+            return;
+        }
+
+        section.style.display = 'block';
+        container.innerHTML = active.map(job => {
+            const pct = job.progress_pct || 0;
+            const stage = job.status.replace(/_/g, ' ');
+            return `
+        <a href="/jobs/${job.id}" class="active-job-card glass-card" style="margin-bottom:12px; display:block; text-decoration:none; color:inherit;">
+            <div class="active-job-header">
+                <span class="job-name">${escapeHtml(job.name || 'Untitled Job')}</span>
+                <span class="badge status-${job.status}">${STATUS_LABELS[job.status] || job.status}</span>
+            </div>
+            <div class="active-job-detail">
+                <span class="active-job-source" title="${escapeHtml(job.source_dir || '')}">${truncatePath(job.source_dir)}</span>
+                <span class="active-job-time">${timeAgo(job.created_at)}</span>
+            </div>
+            <div class="progress-section" style="margin:0;">
+                <div class="progress-bar-lg">
+                    <div class="progress-fill" style="width:${pct}%; transition: width 0.5s ease;"></div>
+                </div>
+                <div style="display:flex; justify-content:space-between;">
+                    <span class="progress-detail">${capitalize(stage)}...</span>
+                    <span class="progress-text">${Math.round(pct)}%</span>
+                </div>
+            </div>
+        </a>`;
+        }).join('');
+
+        // Open WebSocket connections for active jobs
+        active.forEach(job => connectJobWS(job.id));
+    }
+
+    function renderAllJobs(jobs) {
+        const container = document.getElementById('jobs-list');
+        if (!jobs.length) {
+            container.innerHTML = `
+        <div class="empty-state">
+            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="opacity:0.3"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>
+            <p>No jobs yet. Create your first job to get started!</p>
+            <a href="/upload" class="btn btn-primary">Create Job</a>
+        </div>`;
+            return;
+        }
+
+        container.innerHTML = jobs.map(job => {
+            const pct = job.progress_pct || 0;
+            const isActive = ACTIVE_STATUSES.includes(job.status);
+            return `
+        <a href="/jobs/${job.id}" class="job-card">
+            <div class="job-card-main">
+                <div>
+                    <span class="job-name">${escapeHtml(job.name || 'Untitled Job')}</span>
+                    <span class="job-date">${timeAgo(job.created_at)}</span>
+                </div>
+                <div class="job-meta">
+                    ${job.video_count ? `<span class="job-stat">${job.video_count} videos</span>` : ''}
+                    ${job.clip_count ? `<span class="job-stat">${job.clip_count} clips</span>` : ''}
+                    <span class="badge status-${job.status}">${STATUS_LABELS[job.status] || job.status}</span>
+                </div>
+            </div>
+            ${isActive ? `
+            <div class="job-progress">
+                <div class="progress-bar"><div class="progress-fill" style="width:${pct}%"></div></div>
+                <span class="progress-text">${Math.round(pct)}%</span>
+            </div>` : ''}
+            ${job.source_dir ? `<div class="job-source-path">${truncatePath(job.source_dir)}</div>` : ''}
+        </a>`;
+        }).join('');
+    }
+
+    // WebSocket connections for live progress
+    const wsConnections = {};
+    function connectJobWS(jobId) {
+        if (wsConnections[jobId]) return;
+        try {
+            const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const ws = new WebSocket(`${proto}//${location.host}/ws/progress/${jobId}`);
+            wsConnections[jobId] = ws;
+            ws.onmessage = (e) => {
+                try {
+                    const data = JSON.parse(e.data);
+                    if (data.finished) {
+                        ws.close();
+                        delete wsConnections[jobId];
+                        loadDashboard(); // Full refresh
+                    }
+                } catch { }
+            };
+            ws.onclose = () => { delete wsConnections[jobId]; };
+            ws.onerror = () => { delete wsConnections[jobId]; };
+        } catch { }
+    }
+
+    // Utilities
+    function escapeHtml(t) { if (!t) return ''; const d = document.createElement('div'); d.textContent = t; return d.innerHTML; }
+
+    function timeAgo(iso) {
+        if (!iso) return '';
+        const diff = (Date.now() - new Date(iso).getTime()) / 1000;
+        if (diff < 60) return 'just now';
+        if (diff < 3600) return Math.floor(diff / 60) + 'm ago';
+        if (diff < 86400) return Math.floor(diff / 3600) + 'h ago';
+        return Math.floor(diff / 86400) + 'd ago';
+    }
+
+    function truncatePath(p) {
+        if (!p) return '';
+        const parts = p.split('/');
+        if (parts.length > 4) return '…/' + parts.slice(-2).join('/');
+        return p;
+    }
+
+    function capitalize(s) { return s.charAt(0).toUpperCase() + s.slice(1); }
 </script>
 {% endblock %}

@@ -25,6 +25,7 @@ services:
       - pipeline-outputs:/app/data/outputs
       - pipeline-models:/app/data/models
       - pipeline-db:/app/data/db
+      - /mnt/nas/gopro:/mnt/nas/gopro:ro
     environment:
       - DATABASE_URL=sqlite:////app/data/db/pipeline.db
       - REDIS_URL=redis://redis:6379/0
@@ -50,6 +51,7 @@ services:
       - pipeline-outputs:/app/data/outputs
       - pipeline-models:/app/data/models
       - pipeline-db:/app/data/db
+      - /mnt/nas/gopro:/mnt/nas/gopro:ro
     environment:
       - DATABASE_URL=sqlite:////app/data/db/pipeline.db
       - REDIS_URL=redis://redis:6379/0

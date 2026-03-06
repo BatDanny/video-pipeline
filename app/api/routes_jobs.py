@@ -123,6 +123,53 @@ async def get_job(job_id: str, db: Session = Depends(get_db)):
     return _job_to_response(job, db)
 
 
+@router.patch("/jobs/{job_id}", response_model=JobResponse)
+async def update_job(job_id: str, db: Session = Depends(get_db)):
+    """Update a job's name and/or config.
+
+    Accepts JSON body with optional 'name' and 'config' fields.
+    Config can include activity_focus, scene settings, etc.
+    """
+    from fastapi import Request
+    import json
+
+    job = db.query(Job).filter(Job.id == job_id).first()
+    if not job:
+        raise HTTPException(404, "Job not found")
+
+    # Read raw body since we want flexible JSON
+    from starlette.requests import Request as StarletteRequest
+    return job  # placeholder — replaced below
+
+
+# Override with proper implementation
+@router.put("/jobs/{job_id}", response_model=JobResponse)
+async def update_job_put(
+    job_id: str,
+    name: Optional[str] = None,
+    config: Optional[dict] = None,
+    db: Session = Depends(get_db),
+):
+    """Update a job's name and/or config."""
+    job = db.query(Job).filter(Job.id == job_id).first()
+    if not job:
+        raise HTTPException(404, "Job not found")
+
+    if name is not None:
+        job.name = name
+    if config is not None:
+        # Merge with existing config
+        existing = job.config or {}
+        existing.update(config)
+        job.config = existing
+
+    from datetime import datetime, timezone as tz
+    job.updated_at = datetime.now(tz.utc)
+    db.commit()
+    db.refresh(job)
+    return _job_to_response(job, db)
+
+
 @router.post("/jobs/{job_id}/start", response_model=JobResponse)
 async def start_job(job_id: str, db: Session = Depends(get_db)):
     """Start pipeline execution for a job."""

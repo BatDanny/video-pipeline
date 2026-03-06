@@ -154,7 +154,8 @@ def _compute_people_score(objects_detected: list) -> float:
         return 0.5  # Unknown
 
     for obj in objects_detected:
-        if obj.get("class") == "person":
+        cls = obj.get("class_name") or obj.get("category", "")
+        if cls == "person":
             count = obj.get("count", 0)
             confidence = obj.get("avg_confidence", 0.0)
             if count >= 3:

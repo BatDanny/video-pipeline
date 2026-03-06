@@ -13,6 +13,7 @@ from app.api.routes_jobs import router as jobs_router
 from app.api.routes_clips import router as clips_router
 from app.api.routes_highlights import router as highlights_router
 from app.api.routes_config import router as config_router
+from app.api.routes_browse import router as browse_router
 from app.api.websocket import router as ws_router
 
 
@@ -52,6 +53,7 @@ def create_app() -> FastAPI:
     application.include_router(clips_router, prefix="/api", tags=["Clips"])
     application.include_router(highlights_router, prefix="/api", tags=["Highlights"])
     application.include_router(config_router, prefix="/api", tags=["Config"])
+    application.include_router(browse_router, tags=["Browse"])
     application.include_router(ws_router, tags=["WebSocket"])
 
     # Template engine
