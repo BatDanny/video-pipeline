@@ -1,0 +1,113 @@
+{% extends "base.html" %}
+{% block title %}Highlight Editor{% endblock %}
+{% block page_title %}Highlight Editor{% endblock %}
+{% block header_actions %}
+<a href="/jobs/{{ job_id }}/clips" class="btn btn-secondary">← Clip Browser</a>
+{% endblock %}
+{% block content %}
+<div class="highlight-layout">
+    <div class="highlight-main glass-card">
+        <div class="highlight-header">
+            <input type="text" id="reel-name" class="form-input inline-edit" value="Loading...">
+            <div class="highlight-meta">
+                <span id="reel-duration">0:00</span> total
+                <span class="sep">•</span>
+                <span id="reel-clip-count">0</span> clips
+            </div>
+        </div>
+        <div class="timeline" id="timeline">
+            <div class="empty-state" id="timeline-empty">
+                <p>No clips in this reel yet. Use the clip browser to add clips, or click "Auto-fill".</p>
+            </div>
+        </div>
+        <div class="highlight-actions">
+            <button class="btn btn-secondary" onclick="autoFill()">Auto-fill to Target</button>
+            <div class="form-group inline">
+                <label>Transition</label>
+                <select id="transition-type" class="form-select sm" onchange="updateTransition()">
+                    <option value="cut">Hard Cut</option>
+                    <option value="crossfade">Cross Dissolve</option>
+                    <option value="dip_to_black">Dip to Black</option>
+                </select>
+            </div>
+            <div class="export-btns">
+                <button class="btn btn-primary" onclick="exportFCPXML()">
+                    Export FCPXML
+                </button>
+                <button class="btn btn-secondary" onclick="exportMetadata()">
+                    Export Metadata
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+    const JOB_ID = '{{ job_id }}', HL_ID = '{{ highlight_id }}'; let reel = null;
+    document.addEventListener('DOMContentLoaded', loadReel);
+    async function loadReel() {
+        const r = await fetch(`/api/highlights/${HL_ID}`); reel = await r.json();
+        document.getElementById('reel-name').value = reel.name;
+        document.getElementById('transition-type').value = reel.transition_type;
+        renderTimeline();
+    }
+    async function renderTimeline() {
+        const tl = document.getElementById('timeline'); const te = document.getElementById('timeline-empty');
+        if (!reel || !reel.clip_ids || !reel.clip_ids.length) { te.style.display = 'flex'; tl.querySelectorAll('.timeline-clip').forEach(e => e.remove()); updateMeta(); return; }
+        te.style.display = 'none'; let html = ''; let totalDur = 0;
+        for (let i = 0; i < reel.clip_ids.length; i++) {
+            const cid = reel.clip_ids[i];
+            try {
+                const r = await fetch(`/api/clips/${cid}`); const c = await r.json(); totalDur += c.duration_sec;
+                const tags = (c.tags || []).slice(0, 2).map(t => t.tag).join(', ');
+                const th = c.thumbnail_path ? `/api/clips/${cid}/thumbnail` : '';
+                html += `<div class="timeline-clip" draggable="true" data-id="${cid}" data-index="${i}">
+            <div class="tc-thumb" ${th ? `style="background-image:url('${th}')"` : ''}></div>
+            <div class="tc-info"><span class="tc-tags">${escapeHtml(tags || 'untitled')}</span><span class="tc-dur">${fmtDur(c.duration_sec)}</span><span class="tc-score">${c.effective_score.toFixed(0)}</span></div>
+            <div class="tc-actions"><button class="tc-remove" onclick="removeClip(${i})" title="Remove">&times;</button></div>
+        </div>`;
+            } catch (e) { html += `<div class="timeline-clip error"><span>Clip not found</span></div>`; }
+        }
+        tl.querySelectorAll('.timeline-clip').forEach(e => e.remove());
+        tl.insertAdjacentHTML('beforeend', html); reel.actual_duration_sec = totalDur; updateMeta(); setupDragDrop();
+    }
+    function updateMeta() {
+        const d = reel ? reel.actual_duration_sec || 0 : 0;
+        document.getElementById('reel-duration').textContent = fmtDur(d);
+        document.getElementById('reel-clip-count').textContent = reel ? reel.clip_ids.length : 0;
+    }
+    function setupDragDrop() {
+        const clips = document.querySelectorAll('.timeline-clip'); let dragIdx = null;
+        clips.forEach(el => {
+            el.addEventListener('dragstart', e => { dragIdx = parseInt(el.dataset.index); el.classList.add('dragging'); });
+            el.addEventListener('dragend', () => { el.classList.remove('dragging'); });
+            el.addEventListener('dragover', e => { e.preventDefault(); el.classList.add('drag-over'); });
+            el.addEventListener('dragleave', () => { el.classList.remove('drag-over'); });
+            el.addEventListener('drop', async e => {
+                e.preventDefault(); el.classList.remove('drag-over');
+                const dropIdx = parseInt(el.dataset.index); if (dragIdx === null || dragIdx === dropIdx) return;
+                const ids = [...reel.clip_ids]; const [moved] = ids.splice(dragIdx, 1); ids.splice(dropIdx, 0, moved);
+                await saveClipOrder(ids);
+            });
+        });
+    }
+    async function saveClipOrder(ids) {
+        await fetch(`/api/highlights/${HL_ID}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ clip_ids: ids }) });
+        await loadReel();
+    }
+    async function removeClip(idx) {
+        const ids = [...reel.clip_ids]; ids.splice(idx, 1); await saveClipOrder(ids);
+    }
+    async function autoFill() {
+        const r = await fetch(`/api/jobs/${JOB_ID}/highlights`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: reel.name, target_duration_sec: 120, auto_assemble: true }) });
+        if (r.ok) { const h = await r.json(); window.location.href = `/jobs/${JOB_ID}/highlights/${h.id}`; }
+    }
+    async function updateTransition() {
+        await fetch(`/api/highlights/${HL_ID}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ transition_type: document.getElementById('transition-type').value }) });
+    }
+    function exportFCPXML() { window.open(`/api/highlights/${HL_ID}/export/fcpxml`); }
+    function exportMetadata() { window.open(`/api/highlights/${HL_ID}/export/metadata`); }
+    function fmtDur(s) { if (s < 60) return s.toFixed(1) + 's'; return Math.floor(s / 60) + ':' + String(Math.floor(s % 60)).padStart(2, '0'); }
+</script>
+{% endblock %}

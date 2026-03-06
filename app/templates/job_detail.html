@@ -1,0 +1,205 @@
+{% extends "base.html" %}
+
+{% block title %}Job Detail{% endblock %}
+{% block page_title %}<span id="job-title">Loading...</span>{% endblock %}
+
+{% block header_actions %}
+<div class="btn-group" id="job-actions" style="display:none">
+    <button class="btn btn-secondary" id="btn-start" onclick="startJob()" style="display:none">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polygon points="5 3 19 12 5 21 5 3" />
+        </svg>
+        Start Pipeline
+    </button>
+    <button class="btn btn-danger" id="btn-cancel" onclick="cancelJob()" style="display:none">Cancel</button>
+    <a class="btn btn-secondary" id="btn-clips" href="#" style="display:none">Browse Clips</a>
+    <button class="btn btn-danger btn-sm" id="btn-delete" onclick="deleteJob()">Delete</button>
+</div>
+{% endblock %}
+
+{% block content %}
+<!-- Progress Section -->
+<div class="progress-section glass-card" id="progress-section" style="display:none">
+    <div class="progress-header">
+        <span class="progress-stage" id="progress-stage">Initializing...</span>
+        <span class="progress-eta" id="progress-eta"></span>
+    </div>
+    <div class="progress-bar-lg">
+        <div class="progress-fill" id="progress-fill" style="width: 0%"></div>
+    </div>
+    <div class="progress-detail" id="progress-detail"></div>
+</div>
+
+<!-- Job Info -->
+<div class="detail-grid" id="job-info">
+    <div class="glass-card info-card">
+        <h3>Job Information</h3>
+        <dl class="info-list">
+            <dt>Status</dt>
+            <dd id="info-status">—</dd>
+            <dt>Source</dt>
+            <dd id="info-source">—</dd>
+            <dt>Created</dt>
+            <dd id="info-created">—</dd>
+            <dt>Started</dt>
+            <dd id="info-started">—</dd>
+            <dt>Completed</dt>
+            <dd id="info-completed">—</dd>
+        </dl>
+    </div>
+    <div class="glass-card info-card">
+        <h3>Results</h3>
+        <dl class="info-list">
+            <dt>Videos</dt>
+            <dd id="info-videos">—</dd>
+            <dt>Clips Found</dt>
+            <dd id="info-clips">—</dd>
+            <dt>Top Score</dt>
+            <dd id="info-top-score">—</dd>
+        </dl>
+    </div>
+</div>
+
+<!-- Error Message -->
+<div class="error-banner" id="error-banner" style="display:none">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <circle cx="12" cy="12" r="10" />
+        <line x1="15" y1="9" x2="9" y2="15" />
+        <line x1="9" y1="9" x2="15" y2="15" />
+    </svg>
+    <span id="error-text"></span>
+</div>
+
+<!-- Processing Log -->
+<div class="glass-card" id="log-section" style="display:none">
+    <h3>Processing Log</h3>
+    <div class="log-feed" id="log-feed"></div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    const JOB_ID = '{{ job_id }}';
+    let ws = null;
+
+    document.addEventListener('DOMContentLoaded', () => {
+        loadJob();
+        setInterval(loadJob, 5000);
+    });
+
+    async function loadJob() {
+        try {
+            const resp = await fetch(`/api/jobs/${JOB_ID}`);
+            if (!resp.ok) throw new Error('Job not found');
+            const job = await resp.json();
+            renderJob(job);
+        } catch (err) {
+            document.getElementById('job-title').textContent = 'Job Not Found';
+        }
+    }
+
+    function renderJob(job) {
+        document.getElementById('job-title').textContent = job.name;
+        document.getElementById('job-actions').style.display = 'flex';
+
+        // Info
+        document.getElementById('info-status').innerHTML = `<span class="badge status-${job.status}">${job.status.replace(/_/g, ' ')}</span>`;
+        document.getElementById('info-source').textContent = job.source_dir || '—';
+        document.getElementById('info-created').textContent = formatDate(job.created_at);
+        document.getElementById('info-started').textContent = job.started_at ? formatDate(job.started_at) : '—';
+        document.getElementById('info-completed').textContent = job.completed_at ? formatDate(job.completed_at) : '—';
+        document.getElementById('info-videos').textContent = job.video_count;
+        document.getElementById('info-clips').textContent = job.clip_count;
+        document.getElementById('info-top-score').textContent = job.top_score ? job.top_score.toFixed(1) : '—';
+
+        // Buttons
+        const btnStart = document.getElementById('btn-start');
+        const btnCancel = document.getElementById('btn-cancel');
+        const btnClips = document.getElementById('btn-clips');
+
+        btnStart.style.display = job.status === 'pending' ? 'inline-flex' : 'none';
+        btnCancel.style.display = ['ingesting', 'detecting_scenes', 'analyzing', 'scoring', 'assembling', 'enhancing'].includes(job.status) ? 'inline-flex' : 'none';
+        btnClips.style.display = job.clip_count > 0 ? 'inline-flex' : 'none';
+        btnClips.href = `/jobs/${JOB_ID}/clips`;
+
+        // Progress
+        const progressSection = document.getElementById('progress-section');
+        const isRunning = !['pending', 'complete', 'complete_with_errors', 'failed', 'cancelled'].includes(job.status);
+
+        if (isRunning) {
+            progressSection.style.display = 'block';
+            document.getElementById('progress-fill').style.width = `${job.progress_pct}%`;
+            document.getElementById('progress-stage').textContent = job.status.replace(/_/g, ' ');
+            connectWebSocket();
+        } else {
+            progressSection.style.display = job.progress_pct > 0 ? 'block' : 'none';
+            document.getElementById('progress-fill').style.width = `${job.progress_pct}%`;
+            if (ws) { ws.close(); ws = null; }
+        }
+
+        // Error
+        if (job.error_message) {
+            document.getElementById('error-banner').style.display = 'flex';
+            document.getElementById('error-text').textContent = job.error_message;
+        }
+    }
+
+    function connectWebSocket() {
+        if (ws && ws.readyState <= 1) return;
+        const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+        ws = new WebSocket(`${proto}//${location.host}/ws/progress/${JOB_ID}`);
+        ws.onmessage = (e) => {
+            const data = JSON.parse(e.data);
+            if (data.progress_pct !== undefined) {
+                document.getElementById('progress-fill').style.width = `${data.progress_pct}%`;
+            }
+            if (data.stage) {
+                document.getElementById('progress-stage').textContent = data.stage.replace(/_/g, ' ');
+            }
+            if (data.message) {
+                document.getElementById('progress-detail').textContent = data.message;
+                addLog(data.message);
+            }
+            if (data.finished) {
+                loadJob();
+            }
+        };
+        ws.onclose = () => { ws = null; };
+    }
+
+    function addLog(msg) {
+        const section = document.getElementById('log-section');
+        section.style.display = 'block';
+        const feed = document.getElementById('log-feed');
+        const time = new Date().toLocaleTimeString();
+        feed.insertAdjacentHTML('beforeend', `<div class="log-entry"><span class="log-time">${time}</span> ${escapeHtml(msg)}</div>`);
+        feed.scrollTop = feed.scrollHeight;
+    }
+
+    async function startJob() {
+        if (!confirm('Start processing this job?')) return;
+        const resp = await fetch(`/api/jobs/${JOB_ID}/start`, { method: 'POST' });
+        if (resp.ok) loadJob();
+        else alert('Failed to start job');
+    }
+
+    async function cancelJob() {
+        if (!confirm('Cancel this running job?')) return;
+        const resp = await fetch(`/api/jobs/${JOB_ID}/cancel`, { method: 'POST' });
+        if (resp.ok) loadJob();
+    }
+
+    async function deleteJob() {
+        if (!confirm('Delete this job and all associated data? This cannot be undone.')) return;
+        const resp = await fetch(`/api/jobs/${JOB_ID}`, { method: 'DELETE' });
+        if (resp.ok) window.location.href = '/';
+    }
+
+    function formatDate(iso) {
+        return new Date(iso).toLocaleDateString('en-US', {
+            month: 'short', day: 'numeric', year: 'numeric',
+            hour: '2-digit', minute: '2-digit'
+        });
+    }
+</script>
+{% endblock %}

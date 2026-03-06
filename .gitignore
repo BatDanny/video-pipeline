@@ -1,0 +1,46 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual environment
+.venv/
+venv/
+env/
+
+# Environment
+.env
+
+# Database
+data/db/
+*.db
+
+# Uploads & outputs (large files)
+data/uploads/
+data/outputs/
+data/models/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker
+data/
+
+# Alembic
+alembic/versions/*.pyc
+
+# Logs
+*.log

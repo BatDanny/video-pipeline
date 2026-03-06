@@ -1,0 +1,64 @@
+version: "3.9"
+
+services:
+  web:
+    build: .
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 2 --reload
+    ports:
+      - "8000:8000"
+    volumes:
+      - .:/app
+      - ./data/uploads:/app/data/uploads
+      - ./data/outputs:/app/data/outputs
+      - ./data/models:/app/data/models
+      - ./data/db:/app/data/db
+    environment:
+      - DATABASE_URL=sqlite:///data/db/pipeline.db
+      - REDIS_URL=redis://redis:6379/0
+      - UPLOAD_DIR=/app/data/uploads
+      - OUTPUT_DIR=/app/data/outputs
+      - MODEL_CACHE_DIR=/app/data/models
+    depends_on:
+      - redis
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+  worker:
+    build: .
+    command: celery -A app.workers.celery_app worker --loglevel=info --concurrency=2 -Q pipeline,celery
+    volumes:
+      - .:/app
+      - ./data/uploads:/app/data/uploads
+      - ./data/outputs:/app/data/outputs
+      - ./data/models:/app/data/models
+      - ./data/db:/app/data/db
+    environment:
+      - DATABASE_URL=sqlite:///data/db/pipeline.db
+      - REDIS_URL=redis://redis:6379/0
+      - UPLOAD_DIR=/app/data/uploads
+      - OUTPUT_DIR=/app/data/outputs
+      - MODEL_CACHE_DIR=/app/data/models
+    depends_on:
+      - redis
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+
+volumes:
+  redis_data:

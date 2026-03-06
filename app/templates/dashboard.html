@@ -1,0 +1,171 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard{% endblock %}
+{% block nav_dashboard %}active{% endblock %}
+{% block page_title %}Dashboard{% endblock %}
+
+{% block header_actions %}
+<a href="/upload" class="btn btn-primary">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <line x1="12" y1="5" x2="12" y2="19" />
+        <line x1="5" y1="12" x2="19" y2="12" />
+    </svg>
+    New Job
+</a>
+{% endblock %}
+
+{% block content %}
+<!-- Quick Stats -->
+<div class="stats-grid" id="stats-grid">
+    <div class="stat-card">
+        <div class="stat-icon" style="--accent: var(--color-cyan)">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z" />
+                <circle cx="12" cy="13" r="3" />
+            </svg>
+        </div>
+        <div class="stat-info">
+            <span class="stat-value" id="stat-videos">—</span>
+            <span class="stat-label">Videos Processed</span>
+        </div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-icon" style="--accent: var(--color-purple)">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18" />
+                <line x1="7" y1="2" x2="7" y2="22" />
+                <line x1="17" y1="2" x2="17" y2="22" />
+                <line x1="2" y1="12" x2="22" y2="12" />
+                <line x1="2" y1="7" x2="22" y2="7" />
+                <line x1="2" y1="17" x2="22" y2="17" />
+            </svg>
+        </div>
+        <div class="stat-info">
+            <span class="stat-value" id="stat-clips">—</span>
+            <span class="stat-label">Clips Generated</span>
+        </div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-icon" style="--accent: var(--color-green)">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+            </svg>
+        </div>
+        <div class="stat-info">
+            <span class="stat-value" id="stat-top-score">—</span>
+            <span class="stat-label">Best Score</span>
+        </div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-icon" style="--accent: var(--color-orange)">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="10" />
+                <polyline points="12 6 12 12 16 14" />
+            </svg>
+        </div>
+        <div class="stat-info">
+            <span class="stat-value" id="stat-jobs">—</span>
+            <span class="stat-label">Total Jobs</span>
+        </div>
+    </div>
+</div>
+
+<!-- Job List -->
+<div class="section">
+    <div class="section-header">
+        <h2>Recent Jobs</h2>
+    </div>
+    <div class="jobs-list" id="jobs-list">
+        <div class="empty-state" id="empty-state">
+            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"
+                opacity="0.4">
+                <polygon points="23 7 16 12 23 17 23 7" />
+                <rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
+            </svg>
+            <p>No jobs yet. Create your first job to get started!</p>
+            <a href="/upload" class="btn btn-primary">Create Job</a>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    document.addEventListener('DOMContentLoaded', () => {
+        loadDashboard();
+        // Auto-refresh every 10 seconds
+        setInterval(loadDashboard, 10000);
+    });
+
+    async function loadDashboard() {
+        try {
+            const resp = await fetch('/api/jobs');
+            const data = await resp.json();
+            const jobs = data.jobs || [];
+
+            // Update stats
+            let totalVideos = 0, totalClips = 0, topScore = 0;
+            jobs.forEach(j => {
+                totalVideos += j.video_count || 0;
+                totalClips += j.clip_count || 0;
+                if (j.top_score && j.top_score > topScore) topScore = j.top_score;
+            });
+
+            document.getElementById('stat-videos').textContent = totalVideos;
+            document.getElementById('stat-clips').textContent = totalClips;
+            document.getElementById('stat-top-score').textContent = topScore > 0 ? topScore.toFixed(1) : '—';
+            document.getElementById('stat-jobs').textContent = jobs.length;
+
+            // Render job list
+            const list = document.getElementById('jobs-list');
+            const empty = document.getElementById('empty-state');
+
+            if (jobs.length === 0) {
+                empty.style.display = 'flex';
+                return;
+            }
+
+            empty.style.display = 'none';
+            let html = '';
+            jobs.forEach(job => {
+                const statusClass = `status-${job.status}`;
+                const statusLabel = job.status.replace(/_/g, ' ');
+                const date = new Date(job.created_at).toLocaleDateString('en-US', {
+                    month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
+                });
+
+                html += `
+            <a href="/jobs/${job.id}" class="job-card" id="job-${job.id}">
+                <div class="job-card-main">
+                    <div class="job-info">
+                        <h3 class="job-name">${escapeHtml(job.name)}</h3>
+                        <span class="job-date">${date}</span>
+                    </div>
+                    <div class="job-meta">
+                        <span class="badge ${statusClass}">${statusLabel}</span>
+                        <span class="job-stat">${job.video_count} videos</span>
+                        <span class="job-stat">${job.clip_count} clips</span>
+                        ${job.top_score ? `<span class="job-stat score">★ ${job.top_score.toFixed(1)}</span>` : ''}
+                    </div>
+                </div>
+                ${job.status !== 'complete' && job.status !== 'failed' && job.status !== 'pending' ? `
+                <div class="job-progress">
+                    <div class="progress-bar">
+                        <div class="progress-fill" style="width: ${job.progress_pct}%"></div>
+                    </div>
+                    <span class="progress-text">${job.progress_pct.toFixed(0)}%</span>
+                </div>` : ''}
+            </a>`;
+            });
+
+            // Remove empty state and set HTML (keep empty state element)
+            const cards = list.querySelectorAll('.job-card');
+            cards.forEach(c => c.remove());
+            list.insertAdjacentHTML('beforeend', html);
+
+        } catch (err) {
+            console.error('Failed to load dashboard:', err);
+        }
+    }
+</script>
+{% endblock %}

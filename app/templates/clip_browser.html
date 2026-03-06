@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+{% block title %}Clip Browser{% endblock %}
+{% block page_title %}Clip Browser{% endblock %}
+{% block header_actions %}
+<a href="/jobs/{{ job_id }}" class="btn btn-secondary">← Back to Job</a>
+<button class="btn btn-primary" id="btn-create-highlight" onclick="createHighlight()">Create Highlight Reel</button>
+{% endblock %}
+{% block content %}
+<div class="browser-layout">
+    <aside class="filter-sidebar glass-card">
+        <h3>Filters</h3>
+        <div class="filter-group">
+            <label class="form-label">Score Range</label>
+            <div class="range-dual">
+                <input type="range" id="filter-min-score" min="0" max="100" value="0" class="form-range">
+                <span id="filter-score-display">0 – 100</span>
+                <input type="range" id="filter-max-score" min="0" max="100" value="100" class="form-range">
+            </div>
+        </div>
+        <div class="filter-group">
+            <label class="form-label">Sort By</label>
+            <select id="filter-sort" class="form-select">
+                <option value="score" selected>Score (highest)</option>
+                <option value="duration">Duration</option>
+                <option value="chronological">Chronological</option>
+            </select>
+        </div>
+        <div class="filter-group">
+            <label><input type="checkbox" id="filter-favorites"> Favorites only</label>
+        </div>
+        <div class="filter-group">
+            <label><input type="checkbox" id="filter-speech"> Has speech</label>
+        </div>
+        <button class="btn btn-secondary btn-sm" onclick="loadClips()">Apply Filters</button>
+    </aside>
+    <div class="clip-grid-container">
+        <div class="view-controls">
+            <span class="result-count" id="result-count">Loading...</span>
+        </div>
+        <div class="clip-grid" id="clip-grid"></div>
+    </div>
+</div>
+<div class="modal-overlay" id="clip-modal" style="display:none">
+    <div class="modal glass-card">
+        <button class="modal-close" onclick="closeModal()">&times;</button>
+        <div class="modal-body" id="modal-body"></div>
+    </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+    const JOB_ID = '{{ job_id }}'; let allClips = [];
+    document.addEventListener('DOMContentLoaded', () => {
+        loadClips();
+        document.getElementById('filter-min-score').addEventListener('input', updateScoreDisplay);
+        document.getElementById('filter-max-score').addEventListener('input', updateScoreDisplay);
+    });
+    function updateScoreDisplay() { const a = document.getElementById('filter-min-score').value, b = document.getElementById('filter-max-score').value; document.getElementById('filter-score-display').textContent = `${a} – ${b}`; }
+    async function loadClips() {
+        const p = new URLSearchParams(); const mn = document.getElementById('filter-min-score').value, mx = document.getElementById('filter-max-score').value; if (mn > 0) p.set('min_score', mn); if (mx < 100) p.set('max_score', mx); p.set('sort_by', document.getElementById('filter-sort').value); if (document.getElementById('filter-favorites').checked) p.set('favorites_only', 'true'); if (document.getElementById('filter-speech').checked) p.set('has_speech', 'true'); p.set('limit', '200');
+        try { const r = await fetch(`/api/jobs/${JOB_ID}/clips?${p}`); const d = await r.json(); allClips = d.clips || []; renderClips(allClips); document.getElementById('result-count').textContent = `${d.total} clips`; } catch (e) { console.error(e); }
+    }
+    function renderClips(clips) {
+        const g = document.getElementById('clip-grid'); if (!clips.length) { g.innerHTML = '<div class="empty-state"><p>No clips found.</p></div>'; return; }
+        let h = ''; clips.forEach(c => {
+            const tags = (c.tags || []).slice(0, 3).map(t => `<span class="tag-mini">${escapeHtml(t.tag)}</span>`).join('');
+            const sc = c.effective_score >= 70 ? 'high' : c.effective_score >= 40 ? 'mid' : 'low';
+            const th = c.thumbnail_path ? `/api/clips/${c.id}/thumbnail` : '';
+            h += `<div class="clip-card" onclick="openDetail('${c.id}')"><div class="clip-thumb" ${th ? `style="background-image:url('${th}')"` : ''}><span class="clip-duration">${fmtDur(c.duration_sec)}</span><span class="clip-score ${sc}">${c.effective_score.toFixed(0)}</span><button class="clip-fav ${c.is_favorite ? 'active' : ''}" onclick="event.stopPropagation();toggleFav('${c.id}')" title="Favorite">★</button></div><div class="clip-info"><div class="clip-tags">${tags || '<span class="tag-mini muted">no tags</span>'}</div><span class="clip-source">${escapeHtml(c.video_filename || '')}</span></div></div>`;
+        }); g.innerHTML = h;
+    }
+    async function openDetail(id) {
+        const r = await fetch(`/api/clips/${id}`); const c = await r.json(); const pv = c.preview_path ? `/api/clips/${id}/preview` : ''; const th = c.thumbnail_path ? `/api/clips/${id}/thumbnail` : '';
+        const tags = (c.tags || []).map(t => `<span class="tag-pill">${escapeHtml(t.tag)} <small>${(t.score * 100).toFixed(0)}%</small></span>`).join('');
+        document.getElementById('modal-body').innerHTML = `<div class="clip-detail"><div class="clip-detail-media">${pv ? `<video controls autoplay muted loop src="${pv}" class="clip-preview-player"></video>` : th ? `<img src="${th}" class="clip-preview-img">` : '<div class="no-preview">No preview</div>'}</div><div class="clip-detail-info"><div class="detail-row"><span class="detail-label">Source</span><span>${escapeHtml(c.video_filename || '—')}</span></div><div class="detail-row"><span class="detail-label">Time</span><span>${c.start_sec.toFixed(1)}s–${c.end_sec.toFixed(1)}s (${fmtDur(c.duration_sec)})</span></div><div class="detail-row"><span class="detail-label">Score</span><span class="score-lg">${c.effective_score.toFixed(1)}</span></div><div class="detail-row"><span class="detail-label">Tags</span><div class="tag-list">${tags || '—'}</div></div>${c.transcript ? `<div class="detail-row"><span class="detail-label">Transcript</span><p class="transcript">${escapeHtml(c.transcript)}</p></div>` : ''}<div class="detail-actions"><div class="form-group inline"><label>Score Override</label><input type="number" class="form-input sm" id="so-${c.id}" value="${c.user_score_override !== null ? c.user_score_override : ''}" min="0" max="100" step="0.1" placeholder="auto"><button class="btn btn-sm btn-secondary" onclick="saveOverride('${c.id}')">Save</button></div><button class="btn btn-sm ${c.is_favorite ? 'btn-primary' : 'btn-secondary'}" onclick="toggleFav('${c.id}');closeModal();">${c.is_favorite ? '★ Favorited' : '☆ Favorite'}</button></div></div></div>`;
+        document.getElementById('clip-modal').style.display = 'flex';
+    }
+    function closeModal() { document.getElementById('clip-modal').style.display = 'none'; }
+    async function toggleFav(id) { const c = allClips.find(x => x.id === id); if (!c) return; await fetch(`/api/clips/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ is_favorite: !c.is_favorite }) }); c.is_favorite = !c.is_favorite; renderClips(allClips); }
+    async function saveOverride(id) { const v = document.getElementById(`so-${id}`).value; await fetch(`/api/clips/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ user_score_override: v ? parseFloat(v) : null }) }); loadClips(); closeModal(); }
+    async function createHighlight() { const n = prompt('Highlight reel name:', 'Highlight Reel'); if (!n) return; const r = await fetch(`/api/jobs/${JOB_ID}/highlights`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: n, target_duration_sec: 120, min_score: 0, auto_assemble: true }) }); if (r.ok) { const h = await r.json(); window.location.href = `/jobs/${JOB_ID}/highlights/${h.id}`; } else alert('Failed'); }
+    function fmtDur(s) { if (s < 60) return s.toFixed(1) + 's'; return Math.floor(s / 60) + ':' + String(Math.floor(s % 60)).padStart(2, '0'); }
+</script>
+{% endblock %}
