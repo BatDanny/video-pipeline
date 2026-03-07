@@ -83,6 +83,13 @@ docker compose down          # Stop containers (keep data)
 docker compose down -v       # Stop and delete all data volumes
 ```
 
+### Development Notes
+When making structural changes to Python files (`app/**/*.py`), Uvicorn's `--reload` feature will attempt to hot-reload the web container. If there are active WebSocket connections or background threads, this can cause the asyncio event loop to hang and freeze the container.
+**Standard Process for Code Changes**:
+1. Stop the containers: `docker compose stop` or at least `docker compose stop web worker`
+2. Apply the code changes.
+3. Restart the containers: `docker compose start` or `docker compose up -d`
+
 ---
 
 ## GPU Flexibility

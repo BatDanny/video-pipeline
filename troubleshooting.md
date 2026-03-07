@@ -2,6 +2,24 @@
 
 This guide contains known issues, their root causes, and resolutions. It is structured to facilitate automated failure handling in the future.
 
+## Issue: App Becomes Unresponsive On Code Change / Hot Reload
+
+**Symptom:**
+- You save a Python file in the `app/` directory.
+- Uvicorn detects the change and logs `WatchFiles detected changes in '...'. Reloading...`
+- The `web` container stops responding to HTTP requests and WebSockets disconnect.
+- The UI freezes.
+
+**Root Cause:**
+When Uvicorn attempts a hot-reload while there are active long-running WebSockets or asynchronous tasks offloaded to threadpools, the `asyncio` event loop can fail to shut down cleanly. This causes a deadlock, freezing the entire web server until the container is forcefully restarted.
+
+**Resolution / Automation Steps:**
+Always follow the safe development workflow when modifying Python files:
+1. Stop the containers: `docker compose stop web worker`
+2. Apply code modifications.
+3. Start the containers again: `docker compose start web worker`
+If the container is already frozen, run `docker compose restart web` to clear the deadlock.
+
 ## Issue: GPU Underutilization (nvidia-smi shows GPU off / unused)
 
 **Symptom:**

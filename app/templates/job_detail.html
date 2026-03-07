@@ -363,7 +363,14 @@
                 loadJob();
             }
         };
-        ws.onclose = () => { ws = null; };
+        ws.onclose = () => {
+            ws = null;
+            // Attempt to reconnect every 3 seconds if the job isn't finished
+            const status = document.getElementById('info-status').textContent;
+            if (status !== 'COMPLETE' && status !== 'FAILED' && status !== 'CANCELLED') {
+                setTimeout(connectWebSocket, 3000);
+            }
+        };
     }
 
     function renderTelemetry(telemetry) {
