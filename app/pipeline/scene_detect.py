@@ -30,11 +30,21 @@ def _get_model():
 
     try:
         from transnetv2_pytorch import TransNetV2
+        import unittest.mock
 
         device = "cuda" if torch.cuda.is_available() else "cpu"
         logger.info(f"Loading TransNetV2 model on {device}...")
 
-        _model = TransNetV2()
+        # Monkeypatch torch.load to enforce weights_only=True to silence PyTorch security warning
+        original_load = torch.load
+        
+        def safe_load(*args, **kwargs):
+            kwargs['weights_only'] = True
+            return original_load(*args, **kwargs)
+
+        with unittest.mock.patch('torch.load', side_effect=safe_load):
+            _model = TransNetV2()
+            
         _model.eval()
         _model = _model.to(device)
 
@@ -233,8 +243,11 @@ def detect_scenes(job_id: str, progress_callback=None) -> int:
                 })
 
         db.commit()
+        
+        hardware_used = "GPU (TransNetV2)" if _model is not None else "CPU (Fallback)"
+        
         logger.info(f"Created {total_clips} clips for job {job_id}")
-        return total_clips
+        return total_clips, hardware_used
 
     finally:
         # Free GPU VRAM so CLIP/YOLO/Whisper have the full 24GB available

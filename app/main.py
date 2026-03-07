@@ -23,6 +23,14 @@ async def lifespan(app: FastAPI):
     """Startup and shutdown events."""
     settings = get_settings()
 
+    import asyncio
+    import logging
+    
+    logger = logging.getLogger("uvicorn")
+    logger.info("Initializing FastAPI lifespan...")
+    
+    app.state.shutdown_event = asyncio.Event()
+
     # Ensure directories exist
     for d in [settings.upload_dir, settings.output_dir, settings.model_cache_dir]:
         os.makedirs(d, exist_ok=True)
@@ -30,9 +38,12 @@ async def lifespan(app: FastAPI):
     # Initialize database tables (dev mode — production uses Alembic)
     init_db()
 
-    yield  # App is running
-
-    # Shutdown cleanup (if needed)
+    try:
+        yield  # App is running
+    finally:
+        # Shutdown cleanup (if needed)
+        logger.info("FastAPI lifespan shutdown triggered. Setting WebSocket shutdown event.")
+        app.state.shutdown_event.set()
 
 
 def create_app() -> FastAPI:

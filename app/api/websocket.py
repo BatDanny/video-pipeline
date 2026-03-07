@@ -7,6 +7,46 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 router = APIRouter()
 
 
+def _fetch_job_status_sync(job_id: str):
+    from app.models.database import get_session_factory
+    from app.models.job import Job, JobStatus
+    
+    SessionLocal = get_session_factory()
+    db = SessionLocal()
+    try:
+        job = db.query(Job).filter(Job.id == job_id).first()
+        if not job:
+            return {"error": "Job not found"}
+
+        status_data = {
+            "job_id": job.id,
+            "status": job.status.value if isinstance(job.status, JobStatus) else str(job.status),
+            "progress_pct": job.progress_pct or 0.0,
+            "stage": job.status.value if isinstance(job.status, JobStatus) else str(job.status),
+            "message": f"Status: {job.status.value}" if isinstance(job.status, JobStatus) else "",
+            "telemetry": job.telemetry or {},
+        }
+
+        if job.celery_task_id:
+            try:
+                from app.workers.celery_app import celery_app
+                result = celery_app.AsyncResult(job.celery_task_id)
+                if result.info and isinstance(result.info, dict):
+                    status_data.update(result.info)
+            except Exception:
+                pass
+
+        terminal_states = [
+            JobStatus.COMPLETE, JobStatus.COMPLETE_WITH_ERRORS,
+            JobStatus.FAILED, JobStatus.CANCELLED,
+        ]
+        is_terminal = job.status in terminal_states
+
+        return {"status_data": status_data, "is_terminal": is_terminal}
+
+    finally:
+        db.close()
+
 @router.websocket("/ws/progress/{job_id}")
 async def job_progress_ws(websocket: WebSocket, job_id: str):
     """Real-time progress updates for a pipeline job.
@@ -24,59 +64,39 @@ async def job_progress_ws(websocket: WebSocket, job_id: str):
     }
     """
     await websocket.accept()
+    import anyio
 
     try:
-        while True:
-            # Poll job status from database
+        while not websocket.app.state.shutdown_event.is_set():
+            # Poll job status from database in a background thread to prevent blocking
             try:
-                from app.models.database import get_session_factory
-                from app.models.job import Job, JobStatus
+                result = await anyio.to_thread.run_sync(_fetch_job_status_sync, job_id)
+                
+                if "error" in result:
+                    await websocket.send_json(result)
+                    break
+                    
+                status_data = result["status_data"]
+                is_terminal = result["is_terminal"]
 
-                SessionLocal = get_session_factory()
-                db = SessionLocal()
-                try:
-                    job = db.query(Job).filter(Job.id == job_id).first()
-                    if not job:
-                        await websocket.send_json({"error": "Job not found"})
-                        break
+                await websocket.send_json(status_data)
 
-                    status_data = {
-                        "job_id": job.id,
-                        "status": job.status.value if isinstance(job.status, JobStatus) else str(job.status),
-                        "progress_pct": job.progress_pct or 0.0,
-                        "stage": job.status.value if isinstance(job.status, JobStatus) else str(job.status),
-                        "message": f"Status: {job.status.value}" if isinstance(job.status, JobStatus) else "",
-                    }
-
-                    # Try to get detailed progress from Celery task state
-                    if job.celery_task_id:
-                        try:
-                            from app.workers.celery_app import celery_app
-                            result = celery_app.AsyncResult(job.celery_task_id)
-                            if result.info and isinstance(result.info, dict):
-                                status_data.update(result.info)
-                        except Exception:
-                            pass
-
-                    await websocket.send_json(status_data)
-
-                    # Stop polling if job is in a terminal state
-                    terminal_states = [
-                        JobStatus.COMPLETE, JobStatus.COMPLETE_WITH_ERRORS,
-                        JobStatus.FAILED, JobStatus.CANCELLED,
-                    ]
-                    if job.status in terminal_states:
-                        await asyncio.sleep(1)  # Final update delay
-                        await websocket.send_json({**status_data, "finished": True})
-                        break
-
-                finally:
-                    db.close()
+                if is_terminal:
+                    await asyncio.sleep(1)  # Final update delay
+                    await websocket.send_json({**status_data, "finished": True})
+                    break
 
             except Exception as e:
                 await websocket.send_json({"error": str(e)})
 
-            await asyncio.sleep(2)  # Poll every 2 seconds
+            # Poll delay, interruptible by shutdown
+            try:
+                await asyncio.wait_for(
+                    websocket.app.state.shutdown_event.wait(), 
+                    timeout=2.0
+                )
+            except asyncio.TimeoutError:
+                pass  # Timeout means we should poll again
 
     except WebSocketDisconnect:
         pass
@@ -98,8 +118,24 @@ async def worker_logs_ws(websocket: WebSocket):
         )
 
         # Read lines asynchronously and send to websocket
-        while True:
-            line = await process.stdout.readline()
+        while not websocket.app.state.shutdown_event.is_set():
+            # Wait for either a new log line or a shutdown signal
+            read_task = asyncio.create_task(process.stdout.readline())
+            shutdown_task = asyncio.create_task(websocket.app.state.shutdown_event.wait())
+            
+            done, pending = await asyncio.wait(
+                [read_task, shutdown_task], 
+                return_when=asyncio.FIRST_COMPLETED
+            )
+            
+            if shutdown_task in done:
+                for task in pending:
+                    task.cancel()
+                break
+                
+            # Must have been read_task
+            line = read_task.result()
+
             if not line:
                 break
             

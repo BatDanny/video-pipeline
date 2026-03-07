@@ -30,6 +30,22 @@ def _update_job_status(job_id: str, status: JobStatus, progress_pct: float = Non
     finally:
         db.close()
 
+def _update_job_telemetry(job_id: str, stage_name: str, stage_data: dict):
+    """Update telemetry measurements for a specific pipeline stage."""
+    SessionLocal = get_session_factory()
+    db = SessionLocal()
+    try:
+        job = db.query(Job).filter(Job.id == job_id).first()
+        if job:
+            # We must assign a new dict to trigger SQLAlchemy's JSON mutation tracking
+            current_telemetry = dict(job.telemetry or {})
+            current_telemetry[stage_name] = stage_data
+            job.telemetry = current_telemetry
+            job.updated_at = datetime.now(timezone.utc)
+            db.commit()
+    finally:
+        db.close()
+
 
 def _update_task_meta(task, info: dict):
     """Update Celery task metadata for WebSocket consumers and sidebar widget."""
@@ -60,8 +76,11 @@ def run_pipeline(self, job_id: str):
     logger.info(f"Starting pipeline for job {job_id}")
 
     try:
+        import time
+
         # ---- Stage 1: Ingest ----
         _update_job_status(job_id, JobStatus.INGESTING, progress_pct=0.0)
+        _update_job_telemetry(job_id, "ingest", {"status": "running", "start_time": time.time(), "hardware": "CPU (ffprobe)"})
         _update_task_meta(self, {
             "stage": "ingesting",
             "message": "Validating and probing video files...",
@@ -69,7 +88,16 @@ def run_pipeline(self, job_id: str):
         })
 
         from app.pipeline.ingest import ingest_videos
-        video_count = ingest_videos(job_id, progress_callback=lambda info: _update_task_meta(self, info))
+        start_t = time.time()
+        video_count, total_bytes = ingest_videos(job_id, progress_callback=lambda info: _update_task_meta(self, info))
+        dur = time.time() - start_t
+        
+        _update_job_telemetry(job_id, "ingest", {
+            "status": "completed", 
+            "duration": dur, 
+            "hardware": "CPU (ffprobe)",
+            "file_size_bytes": total_bytes
+        })
 
         _update_task_meta(self, {
             "stage": "ingesting",
@@ -80,6 +108,8 @@ def run_pipeline(self, job_id: str):
 
         # ---- Stage 2: Scene Detection ----
         _update_job_status(job_id, JobStatus.DETECTING_SCENES, progress_pct=15.0)
+        _update_job_telemetry(job_id, "detecting_scenes", {"status": "running", "start_time": time.time(), "hardware": "GPU (TransNetV2)"})
+        
         _update_task_meta(self, {
             "stage": "detecting_scenes",
             "message": "Running scene detection...",
@@ -87,7 +117,15 @@ def run_pipeline(self, job_id: str):
         })
 
         from app.pipeline.scene_detect import detect_scenes
-        clip_count = detect_scenes(job_id, progress_callback=lambda info: _update_task_meta(self, info))
+        start_t = time.time()
+        clip_count, hw_used = detect_scenes(job_id, progress_callback=lambda info: _update_task_meta(self, info))
+        dur = time.time() - start_t
+        
+        _update_job_telemetry(job_id, "detecting_scenes", {
+            "status": "completed",
+            "duration": dur,
+            "hardware": hw_used
+        })
 
         _update_task_meta(self, {
             "stage": "detecting_scenes",
@@ -104,6 +142,7 @@ def run_pipeline(self, job_id: str):
 
         # 3a: CLIP Activity Tagging
         _update_job_status(job_id, JobStatus.ANALYZING, progress_pct=25.0)
+        _update_job_telemetry(job_id, "clip_tagging", {"status": "running", "start_time": time.time(), "hardware": f"GPU (CLIP {_settings.clip_model})"})
         _update_task_meta(self, {
             "stage": "analyzing",
             "sub_stage": "clip_tagging",
@@ -112,9 +151,13 @@ def run_pipeline(self, job_id: str):
         })
 
         from app.pipeline.analysis.clip_tagger import run_clip_tagging
+        start_t = time.time()
         run_clip_tagging(job_id, progress_callback=lambda info: _update_task_meta(self, info))
+        dur = time.time() - start_t
+        _update_job_telemetry(job_id, "clip_tagging", {"status": "completed", "duration": dur, "hardware": f"GPU (CLIP {_settings.clip_model})"})
 
         # 3b: YOLOv8 Object Detection
+        _update_job_telemetry(job_id, "object_detection", {"status": "running", "start_time": time.time(), "hardware": f"GPU (YOLO {_settings.yolo_model})"})
         _update_task_meta(self, {
             "stage": "analyzing",
             "sub_stage": "object_detection",
@@ -123,9 +166,13 @@ def run_pipeline(self, job_id: str):
         })
 
         from app.pipeline.analysis.object_detect import detect_objects_for_job
+        start_t = time.time()
         detect_objects_for_job(job_id, progress_callback=lambda info: _update_task_meta(self, info))
+        dur = time.time() - start_t
+        _update_job_telemetry(job_id, "object_detection", {"status": "completed", "duration": dur, "hardware": f"GPU (YOLO {_settings.yolo_model})"})
 
         # 3c: Whisper Transcription
+        _update_job_telemetry(job_id, "transcription", {"status": "running", "start_time": time.time(), "hardware": f"GPU (Whisper {_settings.whisper_model})"})
         _update_task_meta(self, {
             "stage": "analyzing",
             "sub_stage": "transcription",
@@ -134,9 +181,13 @@ def run_pipeline(self, job_id: str):
         })
 
         from app.pipeline.analysis.transcribe import transcribe_clips_for_job
+        start_t = time.time()
         transcribe_clips_for_job(job_id, progress_callback=lambda info: _update_task_meta(self, info))
+        dur = time.time() - start_t
+        _update_job_telemetry(job_id, "transcription", {"status": "completed", "duration": dur, "hardware": f"GPU (Whisper {_settings.whisper_model})"})
 
         # 3d: Motion Analysis (CPU-only, runs fast)
+        _update_job_telemetry(job_id, "motion", {"status": "running", "start_time": time.time(), "hardware": "CPU (OpenCV)"})
         _update_task_meta(self, {
             "stage": "analyzing",
             "sub_stage": "motion",
@@ -145,10 +196,14 @@ def run_pipeline(self, job_id: str):
         })
 
         from app.pipeline.analysis.motion import analyze_motion_for_job
+        start_t = time.time()
         analyze_motion_for_job(job_id, progress_callback=lambda info: _update_task_meta(self, info))
+        dur = time.time() - start_t
+        _update_job_telemetry(job_id, "motion", {"status": "completed", "duration": dur, "hardware": "CPU (OpenCV)"})
 
         # ---- Stage 4: Scoring ----
         _update_job_status(job_id, JobStatus.SCORING, progress_pct=75.0)
+        _update_job_telemetry(job_id, "scoring", {"status": "running", "start_time": time.time(), "hardware": "CPU (Math/Pandas)"})
         _update_task_meta(self, {
             "stage": "scoring",
             "message": "Computing clip scores...",
@@ -156,7 +211,10 @@ def run_pipeline(self, job_id: str):
         })
 
         from app.pipeline.scoring import score_clips
+        start_t = time.time()
         score_clips(job_id)
+        dur = time.time() - start_t
+        _update_job_telemetry(job_id, "scoring", {"status": "completed", "duration": dur, "hardware": "CPU (Math/Pandas)"})
 
         # ---- Stage 5: Generate thumbnails ----
         _update_task_meta(self, {

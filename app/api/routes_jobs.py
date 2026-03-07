@@ -41,6 +41,7 @@ def _job_to_response(job: Job, db: Session) -> JobResponse:
         video_count=video_count,
         clip_count=clip_count,
         top_score=top_score,
+        telemetry=job.telemetry or {},
     )
 
 
@@ -239,3 +240,51 @@ async def delete_job(job_id: str, db: Session = Depends(get_db)):
 
     db.delete(job)
     db.commit()
+
+
+@router.delete("/jobs", status_code=204)
+async def delete_all_jobs(db: Session = Depends(get_db)):
+    """Delete all jobs and sweep all uploaded/output data."""
+    jobs = db.query(Job).all()
+    settings = get_settings()
+
+    for job in jobs:
+        # Stop celery task
+        if job.celery_task_id:
+            try:
+                from app.workers.celery_app import celery_app
+                celery_app.control.revoke(job.celery_task_id, terminate=True)
+            except Exception:
+                pass
+
+        # Wipe output directory
+        if job.output_dir and os.path.isdir(job.output_dir):
+            shutil.rmtree(job.output_dir, ignore_errors=True)
+
+        # Wipe upload directory (only if it's in our managed upload path)
+        if job.source_dir and job.source_dir.startswith(settings.upload_dir):
+            if os.path.isdir(job.source_dir):
+                shutil.rmtree(job.source_dir, ignore_errors=True)
+
+        db.delete(job)
+
+    db.commit()
+    
+    # As a secondary safety net, recursively wipe the managed folders to handle orphaned files
+    if os.path.isdir(settings.output_dir):
+        for item in os.listdir(settings.output_dir):
+            item_path = os.path.join(settings.output_dir, item)
+            if item != ".gitkeep":
+                if os.path.isdir(item_path):
+                    shutil.rmtree(item_path, ignore_errors=True)
+                else:
+                    os.unlink(item_path)
+                    
+    if os.path.isdir(settings.upload_dir):
+        for item in os.listdir(settings.upload_dir):
+            item_path = os.path.join(settings.upload_dir, item)
+            if item != ".gitkeep":
+                if os.path.isdir(item_path):
+                    shutil.rmtree(item_path, ignore_errors=True)
+                else:
+                    os.unlink(item_path)

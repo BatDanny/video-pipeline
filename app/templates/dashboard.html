@@ -79,18 +79,29 @@
 <div class="section-header" style="margin-top:24px; display:flex; align-items:center; justify-content:space-between;">
     <h2>Terminal: Worker Logs</h2>
 </div>
-<div class="terminal-container" style="background:#000; color:#0f0; padding:16px; border-radius:8px; font-family:monospace; height:250px; overflow-y:auto; font-size:12px; white-space:pre-wrap;" id="raw-logs-terminal">
+<div class="terminal-container"
+    style="background:#000; color:#0f0; padding:16px; border-radius:8px; font-family:monospace; height:250px; overflow-y:auto; font-size:12px; white-space:pre-wrap;"
+    id="raw-logs-terminal">
     <div style="opacity:0.5;">Connecting to worker stream...</div>
 </div><!-- All Jobs -->
 <div class="section-header" style="display:flex; align-items:center; justify-content:space-between; margin-top:24px;">
     <h2>All Jobs</h2>
-    <button class="btn btn-sm btn-secondary" onclick="loadDashboard()" title="Refresh">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <polyline points="23 4 23 10 17 10" />
-            <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
-        </svg>
-        Refresh
-    </button>
+    <div>
+        <button class="btn btn-sm btn-secondary" onclick="loadDashboard()" title="Refresh" style="margin-right: 8px;">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="23 4 23 10 17 10" />
+                <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
+            </svg>
+            Refresh
+        </button>
+        <button class="btn btn-sm btn-danger" onclick="deleteAllJobs()" title="Delete All Jobs and Data">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="3 6 5 6 21 6"></polyline>
+                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+            </svg>
+            Clear All Data
+        </button>
+    </div>
 </div>
 <div class="jobs-list" id="jobs-list">
     <div class="empty-state">
@@ -131,7 +142,7 @@
             const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
             logsWs = new WebSocket(`${proto}//${location.host}/ws/logs/worker`);
             const terminal = document.getElementById('raw-logs-terminal');
-            
+
             logsWs.onmessage = (e) => {
                 if (terminal.children.length > 0 && terminal.children[0].textContent.includes('Connecting')) {
                     terminal.innerHTML = '';
@@ -141,7 +152,7 @@
                 const fragment = document.createDocumentFragment();
                 const div = document.createElement('div');
                 div.textContent = text;
-                
+
                 // Very basic colorization
                 if (text.includes('ERROR') || text.includes('Exception') || text.includes('Failed')) {
                     div.style.color = '#ff4444';
@@ -150,15 +161,15 @@
                 } else if (text.includes('INFO')) {
                     div.style.color = '#33b5e5';
                 }
-                
+
                 fragment.appendChild(div);
                 terminal.appendChild(fragment);
-                
+
                 // Keep max 200 lines
                 while (terminal.childNodes.length > 200) {
                     terminal.removeChild(terminal.firstChild);
                 }
-                
+
                 // Auto scroll 
                 terminal.scrollTop = terminal.scrollHeight;
             };
@@ -258,26 +269,61 @@
             const pct = job.progress_pct || 0;
             const isActive = ACTIVE_STATUSES.includes(job.status);
             return `
-        <a href="/jobs/${job.id}" class="job-card">
-            <div class="job-card-main">
-                <div>
-                    <span class="job-name">${escapeHtml(job.name || 'Untitled Job')}</span>
-                    <span class="job-date">${timeAgo(job.created_at)}</span>
+        <div class="job-card" style="position: relative;">
+            <a href="/jobs/${job.id}" style="text-decoration: none; color: inherit; display: block;">
+                <div class="job-card-main">
+                    <div>
+                        <span class="job-name">${escapeHtml(job.name || 'Untitled Job')}</span>
+                        <span class="job-date">${timeAgo(job.created_at)}</span>
+                    </div>
+                    <div class="job-meta">
+                        ${job.video_count ? `<span class="job-stat">${job.video_count} videos</span>` : ''}
+                        ${job.clip_count ? `<span class="job-stat">${job.clip_count} clips</span>` : ''}
+                        <span class="badge status-${job.status}">${STATUS_LABELS[job.status] || job.status}</span>
+                    </div>
                 </div>
-                <div class="job-meta">
-                    ${job.video_count ? `<span class="job-stat">${job.video_count} videos</span>` : ''}
-                    ${job.clip_count ? `<span class="job-stat">${job.clip_count} clips</span>` : ''}
-                    <span class="badge status-${job.status}">${STATUS_LABELS[job.status] || job.status}</span>
-                </div>
-            </div>
-            ${isActive ? `
-            <div class="job-progress">
-                <div class="progress-bar"><div class="progress-fill" style="width:${pct}%"></div></div>
-                <span class="progress-text">${Math.round(pct)}%</span>
-            </div>` : ''}
-            ${job.source_dir ? `<div class="job-source-path">${truncatePath(job.source_dir)}</div>` : ''}
-        </a>`;
+                ${isActive ? `
+                <div class="job-progress">
+                    <div class="progress-bar"><div class="progress-fill" style="width:${pct}%"></div></div>
+                    <span class="progress-text">${Math.round(pct)}%</span>
+                </div>` : ''}
+                ${job.source_dir ? `<div class="job-source-path">${truncatePath(job.source_dir)}</div>` : ''}
+            </a>
+            <button onclick="deleteSingleJob('${job.id}')" class="btn btn-sm btn-danger" style="position: absolute; right: 16px; top: 16px; padding: 4px; border-radius: 4px;" title="Delete Job">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <polyline points="3 6 5 6 21 6"></polyline>
+                    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                </svg>
+            </button>
+        </div>`;
         }).join('');
+    }
+
+    async function deleteAllJobs() {
+        if (!confirm('🚨 Are you absolutely sure you want to completely wipe ALL jobs and highlight clips? Your original NAS files will remain untouched, but all progress and output folders will be explicitly purged. This cannot be undone.')) return;
+
+        try {
+            const r = await fetch('/api/jobs', { method: 'DELETE' });
+            if (!r.ok) {
+                alert('Failed to delete all jobs.');
+            }
+        } catch (e) {
+            console.error(e);
+            alert('Network error while deleting all jobs.');
+        }
+
+        loadDashboard();
+    }
+
+    async function deleteSingleJob(jobId) {
+        if (!confirm('Delete this single job and its associated clips?')) return;
+        try {
+            const r = await fetch(`/api/jobs/${jobId}`, { method: 'DELETE' });
+            if (!r.ok) alert('Failed to delete job.');
+        } catch (e) {
+            console.error(e);
+        }
+        loadDashboard();
     }
 
     // WebSocket connections for live progress

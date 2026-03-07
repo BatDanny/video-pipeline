@@ -40,6 +40,7 @@ class Job(Base):
     error_message = Column(Text, nullable=True)
     progress_pct = Column(Float, default=0.0)
     celery_task_id = Column(String(255), nullable=True)
+    telemetry = Column(JSON, default=dict)
 
     # Relationships
     videos = relationship("Video", back_populates="job", cascade="all, delete-orphan")

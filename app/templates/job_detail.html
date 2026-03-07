@@ -88,11 +88,13 @@
         <div class="progress-fill" id="progress-fill" style="width: 0%"></div>
     </div>
     <div class="progress-detail" id="progress-detail" style="margin-bottom: 8px;"></div>
-    
+
     <!-- File-level progress -->
-    <div id="file-progress-container" style="display:none; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border-subtle);">
+    <div id="file-progress-container"
+        style="display:none; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border-subtle);">
         <div class="progress-header" style="font-size: 0.85em; margin-bottom: 4px;">
-            <span id="file-progress-name" style="color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 80%;">File...</span>
+            <span id="file-progress-name"
+                style="color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 80%;">File...</span>
             <span id="file-progress-text" style="color: var(--text-secondary);">0%</span>
         </div>
         <div class="progress-bar-lg" style="height: 6px;">
@@ -129,6 +131,25 @@
             <dd id="info-top-score">—</dd>
         </dl>
     </div>
+</div>
+
+<!-- Telemetry Section -->
+<div class="glass-card" id="telemetry-section" style="display:none; margin-top: 24px;">
+    <h3>Pipeline Telemetry</h3>
+    <table style="width:100%; text-align:left; border-collapse: collapse; margin-top: 12px; font-size: 0.9em;">
+        <thead>
+            <tr style="border-bottom: 1px solid var(--border-subtle);">
+                <th style="padding: 8px; color: var(--text-secondary);">Stage</th>
+                <th style="padding: 8px; color: var(--text-secondary);">Status</th>
+                <th style="padding: 8px; color: var(--text-secondary);">Hardware</th>
+                <th style="padding: 8px; color: var(--text-secondary);">Duration</th>
+                <th style="padding: 8px; color: var(--text-secondary);">File Size</th>
+            </tr>
+        </thead>
+        <tbody id="telemetry-body">
+            <!-- Populated by JS -->
+        </tbody>
+    </table>
 </div>
 
 <!-- Error Message -->
@@ -230,6 +251,11 @@
             document.getElementById('error-banner').style.display = 'flex';
             document.getElementById('error-text').textContent = job.error_message;
         }
+
+        // Telemetry
+        if (job.telemetry && Object.keys(job.telemetry).length > 0) {
+            renderTelemetry(job.telemetry);
+        }
     }
 
     function toggleEdit() {
@@ -299,7 +325,7 @@
         ws = new WebSocket(`${proto}//${location.host}/ws/progress/${JOB_ID}`);
         ws.onmessage = (e) => {
             const data = JSON.parse(e.data);
-            
+
             // Overall Job Progress
             if (data.progress_pct !== undefined) {
                 document.getElementById('progress-fill').style.width = `${data.progress_pct}%`;
@@ -314,7 +340,7 @@
                     addLog(data.message);
                 }
             }
-            
+
             // File-level Progress tracking
             const fileProgressContainer = document.getElementById('file-progress-container');
             if (data.file_progress_pct !== undefined) {
@@ -328,11 +354,60 @@
                 fileProgressContainer.style.display = 'none';
             }
 
+            // Live Telemetry Rendering
+            if (data.telemetry && Object.keys(data.telemetry).length > 0) {
+                renderTelemetry(data.telemetry);
+            }
+
             if (data.finished) {
                 loadJob();
             }
         };
         ws.onclose = () => { ws = null; };
+    }
+
+    function renderTelemetry(telemetry) {
+        const section = document.getElementById('telemetry-section');
+        const tbody = document.getElementById('telemetry-body');
+        section.style.display = 'block';
+
+        let html = '';
+        const order = ['ingest', 'detecting_scenes', 'clip_tagging', 'object_detection', 'transcription', 'motion', 'scoring'];
+
+        order.forEach(stage => {
+            if (!telemetry[stage]) return;
+            const data = telemetry[stage];
+
+            const stageName = stage.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+            const statusBadge = data.status === 'completed'
+                ? '<span style="color: var(--color-mint)">Completed</span>'
+                : '<span style="color: var(--color-cyan)">Running...</span>';
+
+            const hwBadge = data.hardware ? `<span class="badge" style="background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2);">${data.hardware}</span>` : '—';
+
+            let durationStr = '—';
+            if (data.duration) {
+                const s = Math.round(data.duration);
+                durationStr = Math.floor(s / 60) + 'm ' + (s % 60) + 's';
+            } else if (data.start_time) {
+                const s = Math.round((Date.now() / 1000) - data.start_time);
+                durationStr = Math.floor(s / 60) + 'm ' + (s % 60) + 's';
+            }
+
+            const sizeStr = data.file_size_bytes ? (data.file_size_bytes / (1024 * 1024)).toFixed(1) + ' MB' : '—';
+
+            html += `
+                <tr style="border-bottom: 1px solid rgba(255,255,255,0.05);">
+                    <td style="padding: 12px 8px;">${stageName}</td>
+                    <td style="padding: 12px 8px;">${statusBadge}</td>
+                    <td style="padding: 12px 8px;">${hwBadge}</td>
+                    <td style="padding: 12px 8px; font-family: monospace;">${durationStr}</td>
+                    <td style="padding: 12px 8px; color: var(--text-secondary);">${sizeStr}</td>
+                </tr>
+            `;
+        });
+
+        tbody.innerHTML = html;
     }
 
     function addLog(msg) {

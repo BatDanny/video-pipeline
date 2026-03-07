@@ -36,6 +36,7 @@ class JobResponse(BaseModel):
     video_count: int = 0
     clip_count: int = 0
     top_score: Optional[float] = None
+    telemetry: dict = Field(default_factory=dict)
 
     model_config = {"from_attributes": True}
 

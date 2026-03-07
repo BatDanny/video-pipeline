@@ -101,7 +101,11 @@ def _get_pipeline_info() -> dict:
         settings = get_settings()
         r = redis_lib.Redis.from_url(settings.redis_url, decode_responses=True)
 
-        raw = r.get("videopipe:active_pipeline")
+        try:
+            raw = r.get("videopipe:active_pipeline")
+        finally:
+            r.close()
+
         if not raw:
             return default
 
@@ -159,7 +163,7 @@ def _safe_float(val: str) -> float:
 
 
 @router.get("/gpu/status")
-async def system_status():
+def system_status():
     """Return real-time system metrics: GPU, CPU, RAM, and active pipeline info."""
     gpu_data = _parse_nvidia_smi()
     cpu_ram = _get_cpu_ram()

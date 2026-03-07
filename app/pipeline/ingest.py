@@ -244,8 +244,12 @@ def ingest_videos(job_id: str, progress_callback=None) -> int:
                 })
 
         db.commit()
+        
+        # Calculate total file size from the inserted videos
+        total_size_bytes = sum(v.file_size_bytes or 0 for v in db.query(Video).filter(Video.job_id == job_id).all())
+        
         logger.info(f"Ingested {count} videos for job {job_id}")
-        return count
+        return count, total_size_bytes
 
     finally:
         db.close()
