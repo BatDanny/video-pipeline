@@ -43,14 +43,17 @@ RUN pip install --no-cache-dir setuptools wheel
 RUN pip install --no-cache-dir torch==2.5.1 torchvision==0.20.1 --index-url https://download.pytorch.org/whl/cu124
 
 # Install AI packages (whisper needs --no-build-isolation to see setuptools)
-RUN pip install --no-cache-dir open-clip-torch==2.29.0 ultralytics==8.3.57
+RUN pip install --no-cache-dir open-clip-torch==2.29.0 ultralytics==8.3.57 transnetv2-pytorch==1.0.5
 RUN pip install --no-cache-dir --no-build-isolation openai-whisper==20240930
 
 # Copy application code
 COPY . .
 
-# Create data directories
-RUN mkdir -p /app/data/uploads /app/data/outputs /app/data/models /app/data/db
+# Create data directories and setup non-root user
+RUN groupadd -g 1000 appuser && \
+    useradd -u 1000 -g appuser -s /bin/bash -m appuser && \
+    mkdir -p /app/data/uploads /app/data/outputs /app/data/models /app/data/db /app/data/logs && \
+    chown -R appuser:appuser /app/data
 
 EXPOSE 8000
 

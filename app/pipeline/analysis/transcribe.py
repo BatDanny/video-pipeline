@@ -1,7 +1,8 @@
 """Whisper transcription module — extract speech and generate transcripts.
 
-Uses OpenAI Whisper for automatic speech recognition on clip audio.
-Designed for GoPro footage where speech may be intermittent with wind/action noise.
+Optimized to extract full-video audio via a single ffmpeg call, load it
+via soundfile, and pass numpy array slices directly to Whisper to dodge
+the terrible per-clip I/O overhead.
 """
 
 import os
@@ -9,6 +10,9 @@ import logging
 import subprocess
 import tempfile
 from typing import Optional
+from collections import defaultdict
+import numpy as np
+import soundfile as sf
 
 from app.config import get_settings
 
@@ -31,6 +35,16 @@ def _load_model():
         settings = get_settings()
         model_size = getattr(settings, 'whisper_model', 'medium')
         cache_dir = settings.model_cache_dir
+
+        if model_size == "auto":
+            from app.utils.hardware import get_vram_gb
+            vram_gb = get_vram_gb()
+            if vram_gb >= 22.0:
+                model_size = "large-v3"
+            elif vram_gb >= 14.0:
+                model_size = "medium"
+            else:
+                model_size = "small"
 
         device = 'cuda' if torch.cuda.is_available() else 'cpu'
         logger.info(f"Loading Whisper '{model_size}' model on {device}")
@@ -64,114 +78,72 @@ def _unload_model():
         logger.info("Whisper model unloaded")
 
 
-def _extract_audio(video_path: str, start_sec: float, duration_sec: float,
-                    output_path: str) -> bool:
-    """Extract audio segment from video using ffmpeg."""
+def _extract_full_audio(video_path: str, output_path: str) -> bool:
+    """Extract audio from the ENTIRE video into a 16kHz WAV."""
     try:
         cmd = [
             "ffmpeg", "-y",
-            "-ss", str(start_sec),
             "-i", video_path,
-            "-t", str(duration_sec),
             "-vn",  # No video
-            "-acodec", "pcm_s16le",  # Whisper expects WAV
-            "-ar", "16000",  # 16kHz sample rate (Whisper's native)
+            "-acodec", "pcm_s16le",  # Whisper expects WAV 16-bit
+            "-ar", "16000",  # 16kHz sample rate (Whisper native)
             "-ac", "1",  # Mono
             output_path,
         ]
-        result = subprocess.run(cmd, capture_output=True, timeout=30)
+        result = subprocess.run(cmd, capture_output=True, timeout=120)  # Long timeout for full video
         return result.returncode == 0 and os.path.isfile(output_path)
     except Exception as e:
         logger.error(f"Audio extraction failed: {e}")
         return False
 
 
-def transcribe_clip(video_path: str, start_sec: float, end_sec: float,
-                     language: str = None) -> dict:
-    """Transcribe speech in a clip segment.
+def _transcribe_audio_array(model, audio_data: np.ndarray, language: str = None) -> dict:
+    """Transcribe a clip's audio directly from a memory numpy array."""
+    # Ensure audio is float32 normalized to [-1.0, 1.0] for Whisper
+    audio_data = audio_data.astype(np.float32)
 
-    Args:
-        video_path: Path to source video
-        start_sec, end_sec: Clip boundaries
-        language: Optional language code (e.g., 'en'). Auto-detect if None.
-
-    Returns:
-        Dict with 'transcript', 'has_speech', 'language', 'confidence',
-        'word_count', 'segments'
-    """
-    model = _load_model()
-    if model is None:
+    # Check for empty/silent sequences
+    if len(audio_data) < 16000 or np.abs(audio_data).max() < 0.001:
         return {
-            'transcript': None,
-            'has_speech': False,
-            'language': None,
-            'confidence': 0.0,
-            'word_count': 0,
-            'segments': [],
+            'transcript': None, 'has_speech': False,
+            'language': None, 'confidence': 0.0,
+            'word_count': 0, 'segments': [],
         }
 
-    duration = end_sec - start_sec
-    tmp_audio = None
-
     try:
-        # Extract audio segment
-        tmp_audio = tempfile.mktemp(suffix=".wav", prefix="whisper_")
-        if not _extract_audio(video_path, start_sec, duration, tmp_audio):
-            logger.warning(f"Could not extract audio from {video_path}")
-            return {
-                'transcript': None, 'has_speech': False,
-                'language': None, 'confidence': 0.0,
-                'word_count': 0, 'segments': [],
-            }
-
-        # Check audio file size (skip very small/empty audio)
-        if os.path.getsize(tmp_audio) < 1000:
-            return {
-                'transcript': None, 'has_speech': False,
-                'language': None, 'confidence': 0.0,
-                'word_count': 0, 'segments': [],
-            }
-
-        # Run transcription
+        import torch
         options = {
-            'fp16': True,  # Use half precision on GPU
+            'fp16': True if torch.cuda.is_available() else False,
             'language': language,
             'task': 'transcribe',
-            'no_speech_threshold': 0.6,  # Higher threshold = more strict
+            'no_speech_threshold': 0.6,
             'logprob_threshold': -1.0,
             'compression_ratio_threshold': 2.4,
         }
 
-        import torch
-        if not torch.cuda.is_available():
-            options['fp16'] = False
-
-        result = model.transcribe(tmp_audio, **options)
+        # Passing native numpy array directly to whisper!
+        result = model.transcribe(audio_data, **options)
 
         transcript_text = result.get('text', '').strip()
         segments = result.get('segments', [])
         detected_lang = result.get('language', 'unknown')
 
-        # Calculate speech confidence from segment probabilities
+        # Calculate speech confidence
         if segments:
-            avg_no_speech = sum(
-                s.get('no_speech_prob', 1.0) for s in segments
-            ) / len(segments)
+            avg_no_speech = sum(s.get('no_speech_prob', 1.0) for s in segments) / len(segments)
             has_speech = avg_no_speech < 0.5
             confidence = 1.0 - avg_no_speech
         else:
             has_speech = False
             confidence = 0.0
 
-        # Filter out hallucinated/low-quality transcripts
         word_count = len(transcript_text.split()) if transcript_text else 0
         if word_count < 2 or confidence < 0.3:
             transcript_text = None
             has_speech = False
 
-        # Clean up segment data for storage
         clean_segments = []
-        for seg in segments[:50]:  # Cap at 50 segments
+        for seg in segments[:50]:
             clean_segments.append({
                 'start': round(seg.get('start', 0), 2),
                 'end': round(seg.get('end', 0), 2),
@@ -188,20 +160,16 @@ def transcribe_clip(video_path: str, start_sec: float, end_sec: float,
         }
 
     except Exception as e:
-        logger.error(f"Whisper transcription error: {e}")
+        logger.error(f"Whisper inference error: {e}")
         return {
             'transcript': None, 'has_speech': False,
             'language': None, 'confidence': 0.0,
             'word_count': 0, 'segments': [],
         }
 
-    finally:
-        if tmp_audio and os.path.isfile(tmp_audio):
-            os.unlink(tmp_audio)
 
-
-def transcribe_clips_for_job(job_id: str):
-    """Run Whisper on all clips in a job. Called by the orchestrator."""
+def transcribe_clips_for_job(job_id: str, progress_callback=None):
+    """Run Whisper on all clips in a job natively from RAM via numpy array slicing."""
     from app.models.database import get_session_factory
     from app.models.clip import Clip
     from app.models.video import Video
@@ -210,20 +178,75 @@ def transcribe_clips_for_job(job_id: str):
     db = SessionLocal()
 
     try:
+        model = _load_model()
+        if model is None:
+            logger.error("Whisper model unavailable; skipping transcription.")
+            return
+
         clips = db.query(Clip).filter(Clip.job_id == job_id).all()
         logger.info(f"Running Whisper on {len(clips)} clips for job {job_id}")
 
+        if not clips:
+            return
+            
+        video_clips = defaultdict(list)
         for clip in clips:
-            video = db.query(Video).filter(Video.id == clip.video_id).first()
-            if not video:
+            video_clips[clip.video_id].append(clip)
+            
+        total_clips = len(clips)
+        processed_clips = 0
+
+        for video_id, vclips in video_clips.items():
+            video = db.query(Video).filter(Video.id == video_id).first()
+            if not video or not os.path.exists(video.filepath):
                 continue
+                
+            tmp_full_audio = tempfile.mktemp(suffix=".wav", prefix=f"whisper_{video_id}_")
+            
+            try:
+                # Extract full video audio ONCE
+                logger.info(f"Extracting full audio for video {video.filename}")
+                if not _extract_full_audio(video.filepath, tmp_full_audio):
+                    logger.warning(f"Could not extract audio from {video.filepath}")
+                    continue
+                    
+                # Read into memory float32 numpy array
+                audio_array, samplerate = sf.read(tmp_full_audio, dtype='float32')
+                if samplerate != 16000:
+                    logger.warning(f"Unexpected samplerate {samplerate} from video {video.filepath}")
 
-            result = transcribe_clip(video.filepath, clip.start_sec, clip.end_sec)
+                vclips.sort(key=lambda c: c.start_sec)
+                
+                for clip in vclips:
+                    # Slice the audio array natively!
+                    start_sample = int(clip.start_sec * samplerate)
+                    end_sample = int(clip.end_sec * samplerate)
+                    
+                    # Ensure boundaries are within array length
+                    clip_audio = audio_array[start_sample:end_sample]
+                    
+                    result = _transcribe_audio_array(model, clip_audio)
+                    clip.transcript = result.get('transcript')
+                    clip.has_speech = result.get('has_speech', False)
 
-            clip.transcript = result['transcript']
-            clip.has_speech = result['has_speech']
+                    db.commit()
+                    processed_clips += 1
 
-        db.commit()
+                    if progress_callback:
+                        pct = 55.0 + (9.0 * processed_clips / total_clips)
+                        progress_callback({
+                            "stage": "analyzing",
+                            "sub_stage": "transcription",
+                            "message": f"Transcribing clip {processed_clips}/{total_clips}...",
+                            "progress_pct": round(pct, 1),
+                            "file_progress_pct": (processed_clips / total_clips) * 100,
+                            "file_name": f"Clip {processed_clips}/{total_clips}"
+                        })
+            
+            finally:
+                if tmp_full_audio and os.path.isfile(tmp_full_audio):
+                    os.unlink(tmp_full_audio)
+
         logger.info(f"Whisper transcription complete for job {job_id}")
 
     finally:

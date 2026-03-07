@@ -1,16 +1,20 @@
 <!DOCTYPE html>
 <html lang="en" data-theme="dark">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="description" content="AI-powered video analysis pipeline for GoPro footage — auto-detect highlights, score clips, and export FCPXML timelines">
+    <meta name="description"
+        content="AI-powered video analysis pipeline for GoPro footage — auto-detect highlights, score clips, and export FCPXML timelines">
     <title>{% block title %}Video Pipeline{% endblock %} — AI Highlight Reel Generator</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap"
+        rel="stylesheet">
     <link rel="stylesheet" href="/static/css/style.css">
     {% block head_extra %}{% endblock %}
 </head>
+
 <body>
     <div class="app-layout">
         <!-- Sidebar Navigation -->
@@ -18,8 +22,8 @@
             <div class="sidebar-brand">
                 <div class="brand-icon">
                     <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <polygon points="23 7 16 12 23 17 23 7"/>
-                        <rect x="1" y="5" width="15" height="14" rx="2" ry="2"/>
+                        <polygon points="23 7 16 12 23 17 23 7" />
+                        <rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
                     </svg>
                 </div>
                 <div class="brand-text">
@@ -31,30 +35,105 @@
             <nav class="sidebar-nav">
                 <a href="/" class="nav-link {% block nav_dashboard %}{% endblock %}" id="nav-dashboard">
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <rect x="3" y="3" width="7" height="7" rx="1"/>
-                        <rect x="14" y="3" width="7" height="7" rx="1"/>
-                        <rect x="3" y="14" width="7" height="7" rx="1"/>
-                        <rect x="14" y="14" width="7" height="7" rx="1"/>
+                        <rect x="3" y="3" width="7" height="7" rx="1" />
+                        <rect x="14" y="3" width="7" height="7" rx="1" />
+                        <rect x="3" y="14" width="7" height="7" rx="1" />
+                        <rect x="14" y="14" width="7" height="7" rx="1" />
                     </svg>
                     <span>Dashboard</span>
                 </a>
                 <a href="/upload" class="nav-link {% block nav_upload %}{% endblock %}" id="nav-upload">
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-                        <polyline points="17 8 12 3 7 8"/>
-                        <line x1="12" y1="3" x2="12" y2="15"/>
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                        <polyline points="17 8 12 3 7 8" />
+                        <line x1="12" y1="3" x2="12" y2="15" />
                     </svg>
                     <span>New Job</span>
                 </a>
             </nav>
 
             <div class="sidebar-footer">
-                <div class="gpu-status" id="gpu-status">
-                    <div class="status-dot"></div>
-                    <span>Pipeline Ready</span>
+                <!-- Pipeline Activity Banner -->
+                <div class="pipeline-banner" id="pipeline-banner">
+                    <div class="pipeline-banner-dot" id="pipeline-dot"></div>
+                    <div class="pipeline-banner-info">
+                        <span class="pipeline-model" id="pipeline-model">Idle</span>
+                        <span class="pipeline-message" id="pipeline-message"></span>
+                    </div>
+                </div>
+
+                <div class="sys-widget" id="gpu-widget">
+                    <!-- CPU & RAM -->
+                    <div class="sys-widget-section">
+                        <div class="gpu-metric">
+                            <div class="gpu-metric-label">
+                                <span>🖥️ CPU</span>
+                                <span class="gpu-metric-value" id="sys-cpu">—</span>
+                            </div>
+                            <div class="gpu-metric-bar">
+                                <div class="gpu-metric-fill gpu-fill-cpu" id="sys-cpu-bar"></div>
+                            </div>
+                        </div>
+                        <div class="gpu-metric">
+                            <div class="gpu-metric-label">
+                                <span>🧠 RAM</span>
+                                <span class="gpu-metric-value" id="sys-ram">—</span>
+                            </div>
+                            <div class="gpu-metric-bar">
+                                <div class="gpu-metric-fill gpu-fill-ram" id="sys-ram-bar"></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- GPU Section -->
+                    <div class="sys-widget-section gpu-section">
+                        <div class="gpu-widget-header">
+                            <div class="gpu-widget-dot" id="gpu-dot"></div>
+                            <span class="gpu-widget-name" id="gpu-name">Detecting GPU...</span>
+                        </div>
+                        <div class="gpu-widget-metrics">
+                            <div class="gpu-metric">
+                                <div class="gpu-metric-label">
+                                    <span>🌡️ Temp</span>
+                                    <span class="gpu-metric-value" id="gpu-temp">—</span>
+                                </div>
+                                <div class="gpu-metric-bar">
+                                    <div class="gpu-metric-fill gpu-fill-temp" id="gpu-temp-bar"></div>
+                                </div>
+                            </div>
+                            <div class="gpu-metric">
+                                <div class="gpu-metric-label">
+                                    <span>⚡ GPU</span>
+                                    <span class="gpu-metric-value" id="gpu-util">—</span>
+                                </div>
+                                <div class="gpu-metric-bar">
+                                    <div class="gpu-metric-fill gpu-fill-util" id="gpu-util-bar"></div>
+                                </div>
+                            </div>
+                            <div class="gpu-metric">
+                                <div class="gpu-metric-label">
+                                    <span>💾 VRAM</span>
+                                    <span class="gpu-metric-value" id="gpu-mem">—</span>
+                                </div>
+                                <div class="gpu-metric-bar">
+                                    <div class="gpu-metric-fill gpu-fill-mem" id="gpu-mem-bar"></div>
+                                </div>
+                            </div>
+                            <div class="gpu-metric">
+                                <div class="gpu-metric-label">
+                                    <span>🔌 Power</span>
+                                    <span class="gpu-metric-value" id="gpu-power">—</span>
+                                </div>
+                                <div class="gpu-metric-bar">
+                                    <div class="gpu-metric-fill gpu-fill-power" id="gpu-power-bar"></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
         </aside>
+
 
         <!-- Main Content -->
         <main class="main-content">
@@ -74,4 +153,5 @@
     <script src="/static/js/app.js"></script>
     {% block scripts %}{% endblock %}
 </body>
+
 </html>

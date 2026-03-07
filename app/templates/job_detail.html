@@ -5,7 +5,14 @@
 
 {% block header_actions %}
 <div class="btn-group" id="job-actions" style="display:none">
-    <button class="btn btn-secondary" id="btn-start" onclick="startJob()" style="display:none">
+    <button class="btn btn-secondary" id="btn-edit" onclick="toggleEdit()">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+            <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+        </svg>
+        Edit
+    </button>
+    <button class="btn btn-primary" id="btn-start" onclick="startJob()" style="display:none">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <polygon points="5 3 19 12 5 21 5 3" />
         </svg>
@@ -18,6 +25,59 @@
 {% endblock %}
 
 {% block content %}
+<!-- Edit Form (Visible only in edit mode) -->
+<div id="edit-form-section" class="glass-card"
+    style="display:none; margin-bottom: 24px; border: 1px solid var(--color-cyan);">
+    <h3 style="margin-top:0; display:flex; justify-content:space-between; align-items:center;">
+        Tune Pipeline Settings
+        <button class="btn btn-sm btn-secondary" onclick="toggleEdit()">Cancel</button>
+    </h3>
+
+    <div class="form-group" style="margin-bottom:20px;">
+        <label for="edit-job-name" class="form-label">Job Name</label>
+        <input type="text" id="edit-job-name" class="form-input" placeholder="Job Name">
+    </div>
+
+    <div class="form-group" style="margin-bottom:20px;">
+        <label class="form-label">Activity Focus</label>
+        <div class="tag-grid" id="edit-tag-grid"
+            style="max-height: 200px; overflow-y: auto; padding: 10px; background: rgba(0,0,0,0.2); border-radius: 8px;">
+            {% for tag in tag_vocabulary %}
+            <label class="tag-checkbox">
+                <input type="checkbox" name="edit-activity-tag" value="{{ tag }}">
+                <span class="tag-pill">{{ tag }}</span>
+            </label>
+            {% endfor %}
+        </div>
+    </div>
+
+    <div class="detail-grid">
+        <div class="form-group">
+            <label class="form-label" title="How aggressively the AI splits the video into clips.">Scene Sensitivity
+                <span style="cursor:help; font-size:0.8em; opacity:0.7">ⓘ</span></label>
+            <div class="slider-group">
+                <input type="range" id="edit-scene-threshold" class="form-range" min="10" max="50" step="1" value="27">
+                <span class="range-value" id="edit-scene-threshold-val">27</span>
+            </div>
+            <p class="form-hint">Lower value = more fragmented clips. Default: 27</p>
+        </div>
+        <div class="form-group">
+            <label class="form-label" title="The total target length of the final generated highlight reel.">Target
+                Highlight Duration <span style="cursor:help; font-size:0.8em; opacity:0.7">ⓘ</span></label>
+            <div class="slider-group">
+                <input type="range" id="edit-target-duration" class="form-range" min="30" max="600" step="10"
+                    value="120">
+                <span class="range-value" id="edit-target-duration-val">2:00</span>
+            </div>
+            <p class="form-hint">The desired total runtime of the final video compilation.</p>
+        </div>
+    </div>
+
+    <div style="margin-top:24px; display:flex; gap:12px;">
+        <button class="btn btn-primary" onclick="saveJobEdits()">Save Changes</button>
+        <button class="btn btn-secondary" onclick="toggleEdit()">Discard</button>
+    </div>
+</div>
 <!-- Progress Section -->
 <div class="progress-section glass-card" id="progress-section" style="display:none">
     <div class="progress-header">
@@ -27,7 +87,18 @@
     <div class="progress-bar-lg">
         <div class="progress-fill" id="progress-fill" style="width: 0%"></div>
     </div>
-    <div class="progress-detail" id="progress-detail"></div>
+    <div class="progress-detail" id="progress-detail" style="margin-bottom: 8px;"></div>
+    
+    <!-- File-level progress -->
+    <div id="file-progress-container" style="display:none; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border-subtle);">
+        <div class="progress-header" style="font-size: 0.85em; margin-bottom: 4px;">
+            <span id="file-progress-name" style="color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 80%;">File...</span>
+            <span id="file-progress-text" style="color: var(--text-secondary);">0%</span>
+        </div>
+        <div class="progress-bar-lg" style="height: 6px;">
+            <div class="progress-fill" id="file-progress-fill" style="width: 0%; background: var(--color-cyan);"></div>
+        </div>
+    </div>
 </div>
 
 <!-- Job Info -->
@@ -81,18 +152,30 @@
 <script>
     const JOB_ID = '{{ job_id }}';
     let ws = null;
+    let isEditing = false;
+    let currentJob = null;
 
     document.addEventListener('DOMContentLoaded', () => {
         loadJob();
-        setInterval(loadJob, 5000);
+        setInterval(() => { if (!isEditing) loadJob(); }, 5000);
+
+        // Sliders
+        document.getElementById('edit-scene-threshold').addEventListener('input', e => {
+            document.getElementById('edit-scene-threshold-val').textContent = e.target.value;
+        });
+        document.getElementById('edit-target-duration').addEventListener('input', e => {
+            const s = parseInt(e.target.value);
+            document.getElementById('edit-target-duration-val').textContent =
+                Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
+        });
     });
 
     async function loadJob() {
         try {
             const resp = await fetch(`/api/jobs/${JOB_ID}`);
             if (!resp.ok) throw new Error('Job not found');
-            const job = await resp.json();
-            renderJob(job);
+            currentJob = await resp.json();
+            renderJob(currentJob);
         } catch (err) {
             document.getElementById('job-title').textContent = 'Job Not Found';
         }
@@ -116,7 +199,10 @@
         const btnStart = document.getElementById('btn-start');
         const btnCancel = document.getElementById('btn-cancel');
         const btnClips = document.getElementById('btn-clips');
+        const btnEdit = document.getElementById('btn-edit');
 
+        const canEdit = ['pending', 'complete', 'failed'].includes(job.status);
+        btnEdit.style.display = canEdit ? 'inline-flex' : 'none';
         btnStart.style.display = job.status === 'pending' ? 'inline-flex' : 'none';
         btnCancel.style.display = ['ingesting', 'detecting_scenes', 'analyzing', 'scoring', 'assembling', 'enhancing'].includes(job.status) ? 'inline-flex' : 'none';
         btnClips.style.display = job.clip_count > 0 ? 'inline-flex' : 'none';
@@ -134,7 +220,9 @@
         } else {
             progressSection.style.display = job.progress_pct > 0 ? 'block' : 'none';
             document.getElementById('progress-fill').style.width = `${job.progress_pct}%`;
+            document.getElementById('progress-detail').textContent = `Overall job progress is at ${job.progress_pct}%`;
             if (ws) { ws.close(); ws = null; }
+            document.getElementById('file-progress-container').style.display = 'none';
         }
 
         // Error
@@ -144,12 +232,75 @@
         }
     }
 
+    function toggleEdit() {
+        isEditing = !isEditing;
+        const formSection = document.getElementById('edit-form-section');
+        formSection.style.display = isEditing ? 'block' : 'none';
+
+        if (isEditing && currentJob) {
+            // Populate form
+            document.getElementById('edit-job-name').value = currentJob.name;
+
+            const config = currentJob.config || {};
+            const focus = config.activity_focus || [];
+
+            document.querySelectorAll('input[name="edit-activity-tag"]').forEach(cb => {
+                cb.checked = focus.includes(cb.value);
+            });
+
+            const threshold = config.scene_threshold || 27;
+            document.getElementById('edit-scene-threshold').value = threshold;
+            document.getElementById('edit-scene-threshold-val').textContent = threshold;
+
+            const duration = config.target_duration || 120;
+            document.getElementById('edit-target-duration').value = duration;
+            document.getElementById('edit-target-duration-val').textContent =
+                Math.floor(duration / 60) + ':' + String(duration % 60).padStart(2, '0');
+        }
+    }
+
+    async function saveJobEdits() {
+        const name = document.getElementById('edit-job-name').value;
+        const focus = Array.from(document.querySelectorAll('input[name="edit-activity-tag"]:checked')).map(cb => cb.value);
+        const threshold = parseInt(document.getElementById('edit-scene-threshold').value);
+        const duration = parseInt(document.getElementById('edit-target-duration').value);
+
+        const payload = {
+            name: name,
+            config: {
+                activity_focus: focus,
+                scene_threshold: threshold,
+                target_duration: duration
+            }
+        };
+
+        try {
+            const resp = await fetch(`/api/jobs/${JOB_ID}`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+
+            if (!resp.ok) {
+                const err = await resp.json();
+                throw new Error(err.detail || 'Failed to update job');
+            }
+
+            toggleEdit();
+            loadJob();
+        } catch (err) {
+            alert(err.message);
+        }
+    }
+
     function connectWebSocket() {
         if (ws && ws.readyState <= 1) return;
         const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
         ws = new WebSocket(`${proto}//${location.host}/ws/progress/${JOB_ID}`);
         ws.onmessage = (e) => {
             const data = JSON.parse(e.data);
+            
+            // Overall Job Progress
             if (data.progress_pct !== undefined) {
                 document.getElementById('progress-fill').style.width = `${data.progress_pct}%`;
             }
@@ -158,8 +309,25 @@
             }
             if (data.message) {
                 document.getElementById('progress-detail').textContent = data.message;
-                addLog(data.message);
+                // Only log significant messages, not per-file updates, to avoid spam
+                if (!data.file_progress_pct) {
+                    addLog(data.message);
+                }
             }
+            
+            // File-level Progress tracking
+            const fileProgressContainer = document.getElementById('file-progress-container');
+            if (data.file_progress_pct !== undefined) {
+                fileProgressContainer.style.display = 'block';
+                document.getElementById('file-progress-fill').style.width = `${data.file_progress_pct}%`;
+                document.getElementById('file-progress-text').textContent = `${Math.round(data.file_progress_pct)}%`;
+                if (data.file_name) {
+                    document.getElementById('file-progress-name').textContent = data.file_name;
+                }
+            } else if (data.progress_pct === 100 || data.finished) {
+                fileProgressContainer.style.display = 'none';
+            }
+
             if (data.finished) {
                 loadJob();
             }
@@ -201,5 +369,7 @@
             hour: '2-digit', minute: '2-digit'
         });
     }
+
+    function escapeHtml(t) { if (!t) return ''; const d = document.createElement('div'); d.textContent = t; return d.innerHTML; }
 </script>
 {% endblock %}

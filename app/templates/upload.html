@@ -111,20 +111,23 @@
         </button>
         <div class="section-content" id="settings-content" style="display:none;">
             <div class="form-group">
-                <label class="form-label">Scene Detection Sensitivity</label>
+                <label class="form-label" title="How aggressively the AI splits the video into clips.">Scene Detection
+                    Sensitivity <span style="cursor:help; font-size:0.8em; opacity:0.7">ⓘ</span></label>
                 <div class="slider-group">
                     <input type="range" id="scene-threshold" class="form-range" min="10" max="50" step="1" value="27">
                     <span class="range-value" id="scene-threshold-val">27</span>
                 </div>
-                <p class="form-hint">Lower = more scenes. Default: 27</p>
+                <p class="form-hint">Lower value = more fragmented clips. Default: 27</p>
             </div>
             <div class="form-group">
-                <label class="form-label">Target Highlight Duration</label>
+                <label class="form-label" title="The total target length of the final generated highlight reel.">Target
+                    Highlight Duration <span style="cursor:help; font-size:0.8em; opacity:0.7">ⓘ</span></label>
                 <div class="slider-group">
                     <input type="range" id="target-duration" class="form-range" min="30" max="600" step="10"
                         value="120">
                     <span class="range-value" id="target-duration-val">2:00</span>
                 </div>
+                <p class="form-hint">The desired total runtime of the final video compilation.</p>
             </div>
             <div class="form-group">
                 <label class="form-label">Transition Style</label>

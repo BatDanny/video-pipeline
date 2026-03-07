@@ -191,7 +191,7 @@ video-pipeline/
 │   ├── pipeline/               # Processing pipeline
 │   │   ├── orchestrator.py     # Celery task chain
 │   │   ├── ingest.py           # ffprobe + file validation
-│   │   ├── scene_detect.py     # PySceneDetect wrapper
+│   │   ├── scene_detect.py     # TransNetV2 (GPU) scene detection
 │   │   ├── scoring.py          # Weighted composite scorer
 │   │   ├── highlight_builder.py# Auto-assembly algorithm
 │   │   ├── analysis/           # AI modules (CLIP, YOLO, Whisper, motion)
@@ -204,4 +204,4 @@ video-pipeline/
 
 ## Tech Stack
 
-FastAPI • Celery • Redis • SQLAlchemy • PySceneDetect • OpenCLIP • YOLOv8 • Whisper • OpenCV • lxml (FCPXML) • Docker • NVIDIA CUDA
+FastAPI • Celery • Redis • SQLAlchemy • TransNetV2 • OpenCLIP • YOLOv8 • Whisper • OpenCV • lxml (FCPXML) • Docker • NVIDIA CUDA

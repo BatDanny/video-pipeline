@@ -16,35 +16,10 @@
 services:
   web:
     build: .
+    user: "${UID:-1000}:${GID:-1000}"
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 2 --reload
     ports:
       - "8000:8000"
-    volumes:
-      - .:/app
-      - pipeline-uploads:/app/data/uploads
-      - pipeline-outputs:/app/data/outputs
-      - pipeline-models:/app/data/models
-      - pipeline-db:/app/data/db
-      - /mnt/nas/gopro:/mnt/nas/gopro:ro
-    environment:
-      - DATABASE_URL=sqlite:////app/data/db/pipeline.db
-      - REDIS_URL=redis://redis:6379/0
-      - UPLOAD_DIR=/app/data/uploads
-      - OUTPUT_DIR=/app/data/outputs
-      - MODEL_CACHE_DIR=/app/data/models
-    depends_on:
-      redis:
-        condition: service_started
-    restart: unless-stopped
-    healthcheck:
-      test: [ "CMD", "curl", "-f", "http://localhost:8000/" ]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-
-  worker:
-    build: .
-    command: celery -A app.workers.celery_app worker --loglevel=info --concurrency=2 -Q pipeline,celery
     volumes:
       - .:/app
       - pipeline-uploads:/app/data/uploads
@@ -63,6 +38,44 @@ services:
       redis:
         condition: service_started
     restart: unless-stopped
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [ gpu ]
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:8000/" ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  worker:
+    build: .
+    pid: "host"
+    user: "${UID:-1000}:${GID:-1000}"
+    command: bash -c "mkdir -p /app/data/logs && celery -A app.workers.celery_app worker --loglevel=info --concurrency=2 -Q pipeline,celery 2>&1 | tee /app/data/logs/worker.log"
+    volumes:
+      - .:/app
+      - pipeline-uploads:/app/data/uploads
+      - pipeline-outputs:/app/data/outputs
+      - pipeline-models:/app/data/models
+      - pipeline-db:/app/data/db
+      - /mnt/nas/gopro:/mnt/nas/gopro:ro
+    environment:
+      - DATABASE_URL=sqlite:////app/data/db/pipeline.db
+      - REDIS_URL=redis://redis:6379/0
+      - UPLOAD_DIR=/app/data/uploads
+      - OUTPUT_DIR=/app/data/outputs
+      - MODEL_CACHE_DIR=/app/data/models
+      - NVIDIA_VISIBLE_DEVICES=all
+    depends_on:
+      redis:
+        condition: service_started
+    restart: unless-stopped
+    healthcheck:
+      disable: true
     deploy:
       resources:
         reservations:

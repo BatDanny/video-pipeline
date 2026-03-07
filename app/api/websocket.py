@@ -82,3 +82,45 @@ async def job_progress_ws(websocket: WebSocket, job_id: str):
         pass
     except Exception:
         pass
+
+
+@router.websocket("/ws/logs/worker")
+async def worker_logs_ws(websocket: WebSocket):
+    """Real-time streaming of Celery worker container logs via docker."""
+    await websocket.accept()
+    process = None
+    try:
+        # Start tail process on the shared log file
+        process = await asyncio.create_subprocess_exec(
+            "tail", "-n", "100", "-f", "/app/data/logs/worker.log",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT
+        )
+
+        # Read lines asynchronously and send to websocket
+        while True:
+            line = await process.stdout.readline()
+            if not line:
+                break
+            
+            try:
+                msg = line.decode("utf-8").rstrip("\r\n")
+                if msg:
+                    await websocket.send_text(msg)
+            except Exception:
+                pass
+
+    except WebSocketDisconnect:
+        pass
+    except Exception as e:
+        try:
+            await websocket.send_text(f"[Log Stream Error] {str(e)}")
+        except Exception:
+            pass
+    finally:
+        if process and process.returncode is None:
+            try:
+                process.kill()
+            except Exception:
+                pass
+

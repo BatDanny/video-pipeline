@@ -183,7 +183,7 @@ def analyze_motion(video_path: str, start_sec: float, end_sec: float) -> dict:
         }
 
 
-def analyze_motion_for_job(job_id: str):
+def analyze_motion_for_job(job_id: str, progress_callback=None):
     """Run motion analysis on all clips in a job. Called by the orchestrator."""
     from app.models.database import get_session_factory
     from app.models.clip import Clip
@@ -196,7 +196,19 @@ def analyze_motion_for_job(job_id: str):
         clips = db.query(Clip).filter(Clip.job_id == job_id).all()
         logger.info(f"Running motion analysis on {len(clips)} clips for job {job_id}")
 
-        for clip in clips:
+        total = len(clips)
+        for i, clip in enumerate(clips):
+            if progress_callback:
+                pct = 65.0 + (9.0 * (i + 1) / total)  # motion = 65% to 74%
+                progress_callback({
+                    "stage": "analyzing",
+                    "sub_stage": "motion",
+                    "message": f"Analyzing motion in clip {i + 1}/{total}...",
+                    "progress_pct": round(pct, 1),
+                    "file_progress_pct": ((i + 1) / total) * 100,
+                    "file_name": f"Clip {i + 1}/{total}"
+                })
+
             video = db.query(Video).filter(Video.id == clip.video_id).first()
             if not video:
                 continue

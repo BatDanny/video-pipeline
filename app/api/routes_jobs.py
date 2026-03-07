@@ -13,7 +13,7 @@ from app.models.database import get_db
 from app.models.job import Job, JobStatus
 from app.models.video import Video
 from app.models.clip import Clip
-from app.schemas.job import JobCreate, JobResponse, JobListResponse, JobStartRequest
+from app.schemas.job import JobCreate, JobUpdate, JobResponse, JobListResponse, JobStartRequest
 from app.config import get_settings
 
 router = APIRouter()
@@ -124,47 +124,39 @@ async def get_job(job_id: str, db: Session = Depends(get_db)):
 
 
 @router.patch("/jobs/{job_id}", response_model=JobResponse)
-async def update_job(job_id: str, db: Session = Depends(get_db)):
-    """Update a job's name and/or config.
-
-    Accepts JSON body with optional 'name' and 'config' fields.
-    Config can include activity_focus, scene settings, etc.
-    """
-    from fastapi import Request
-    import json
-
-    job = db.query(Job).filter(Job.id == job_id).first()
-    if not job:
-        raise HTTPException(404, "Job not found")
-
-    # Read raw body since we want flexible JSON
-    from starlette.requests import Request as StarletteRequest
-    return job  # placeholder — replaced below
-
-
-# Override with proper implementation
-@router.put("/jobs/{job_id}", response_model=JobResponse)
-async def update_job_put(
+async def update_job(
     job_id: str,
-    name: Optional[str] = None,
-    config: Optional[dict] = None,
+    update: JobUpdate,
     db: Session = Depends(get_db),
 ):
-    """Update a job's name and/or config."""
+    """Update a job's name and/or config.
+
+    Only permitted if job is in PENDING, COMPLETE, or FAILED status.
+    Cannot change config for a job that is currently RUNNING.
+    """
     job = db.query(Job).filter(Job.id == job_id).first()
     if not job:
         raise HTTPException(404, "Job not found")
 
-    if name is not None:
-        job.name = name
-    if config is not None:
-        # Merge with existing config
-        existing = job.config or {}
-        existing.update(config)
-        job.config = existing
+    # Guard against updates while running
+    running_statuses = [
+        JobStatus.INGESTING, JobStatus.DETECTING_SCENES,
+        JobStatus.ANALYZING, JobStatus.SCORING,
+        JobStatus.ASSEMBLING, JobStatus.ENHANCING,
+    ]
+    if job.status in running_statuses:
+        raise HTTPException(400, "Cannot update job while it is running")
 
-    from datetime import datetime, timezone as tz
-    job.updated_at = datetime.now(tz.utc)
+    if update.name is not None:
+        job.name = update.name
+
+    if update.config is not None:
+        # Merge with existing config
+        current_config = job.config or {}
+        current_config.update(update.config)
+        job.config = current_config
+
+    job.updated_at = datetime.now(timezone.utc)
     db.commit()
     db.refresh(job)
     return _job_to_response(job, db)

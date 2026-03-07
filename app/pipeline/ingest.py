@@ -4,6 +4,7 @@ import os
 import json
 import subprocess
 import logging
+import hashlib
 from typing import Optional
 
 from app.models.database import get_session_factory
@@ -117,7 +118,31 @@ def _extract_gopro_telemetry(filepath: str) -> Optional[dict]:
         return None
 
 
-def ingest_videos(job_id: str) -> int:
+def _get_fast_file_hash(filepath: str, chunk_size: int = 1024 * 1024) -> str:
+    """Generate a fast, deterministic hash for a video file.
+    
+    Reads up to the first 4MB plus the file size to avoid hashing multi-GB
+    files completely, which would massively slow down ingestion.
+    """
+    hasher = hashlib.md5()
+    try:
+        file_stat = os.stat(filepath)
+        hasher.update(str(file_stat.st_size).encode('utf-8'))
+        
+        with open(filepath, 'rb') as f:
+            for _ in range(4): # Read first 4MB max
+                chunk = f.read(chunk_size)
+                if not chunk:
+                    break
+                hasher.update(chunk)
+    except Exception as e:
+        logger.warning(f"Hash calculation failed for {filepath}: {e}")
+        return filepath # fallback to absolute filepath if we can't hash
+        
+    return hasher.hexdigest()
+
+
+def ingest_videos(job_id: str, progress_callback=None) -> int:
     """Ingest all video files for a job.
 
     Scans the job's source_dir, validates files, probes with ffprobe,
@@ -138,6 +163,7 @@ def ingest_videos(job_id: str) -> int:
             raise ValueError(f"Source directory not found: {source_dir}")
 
         # Scan for video files (including subdirectories)
+        logger.info(f"Scanning directory for supported videos: {source_dir}")
         video_files = []
         for root, _dirs, files in os.walk(source_dir):
             for fname in sorted(files):
@@ -151,8 +177,38 @@ def ingest_videos(job_id: str) -> int:
         logger.info(f"Found {len(video_files)} video files for job {job_id}")
 
         count = 0
+        total_files = len(video_files)
+        seen_hashes = set()
+        
         for filepath in video_files:
+            if progress_callback:
+                pct = (count / total_files) * 14.0  # ingest = 0% to 14%
+                progress_callback({
+                    "stage": "ingesting",
+                    "message": f"Probing {os.path.basename(filepath)} ({count+1}/{total_files})...",
+                    "progress_pct": round(pct, 1),
+                    "file_progress_pct": (count / total_files) * 100,
+                    "file_name": os.path.basename(filepath)
+                })
+
+            # Deduplication check
+            file_hash = _get_fast_file_hash(filepath)
+            if file_hash in seen_hashes:
+                logger.info(f"[{count+1}/{total_files}] Skipping duplicate file: {filepath}")
+                if progress_callback:
+                    progress_callback({
+                        "stage": "ingesting",
+                        "message": f"Skipped duplicate: {os.path.basename(filepath)}",
+                        "file_progress_pct": (count / total_files) * 100,
+                        "file_name": os.path.basename(filepath)
+                    })
+                count += 1
+                continue
+                
+            seen_hashes.add(file_hash)
+
             # Probe with ffprobe
+            logger.info(f"[{count+1}/{total_files}] Probing file: {filepath}")
             probe_data = _run_ffprobe(filepath)
             if not probe_data:
                 logger.warning(f"Skipping {filepath} — ffprobe failed")
@@ -175,8 +231,17 @@ def ingest_videos(job_id: str) -> int:
                 file_size_bytes=metadata["file_size_bytes"],
                 gopro_metadata=gopro_meta,
             )
+            logger.info(f"Created Video record for {filepath}")
             db.add(video)
             count += 1
+
+            if progress_callback:
+                progress_callback({
+                    "stage": "ingesting",
+                    "message": f"Ingested {os.path.basename(filepath)}",
+                    "file_progress_pct": (count / total_files) * 100,
+                    "file_name": os.path.basename(filepath)
+                })
 
         db.commit()
         logger.info(f"Ingested {count} videos for job {job_id}")

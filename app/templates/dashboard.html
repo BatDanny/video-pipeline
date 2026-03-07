@@ -49,13 +49,39 @@
     </div>
 </div>
 
+<!-- Live Pipeline Status (Giant Banner) -->
+<div id="dashboard-live-status" class="dashboard-live-banner" style="display:none;">
+    <div class="live-banner-content">
+        <div class="live-banner-header">
+            <div class="live-status-indicator"></div>
+            <h2 id="live-banner-model">Pipeline Active</h2>
+        </div>
+        <p id="live-banner-message" class="live-banner-message">Waiting for tasks...</p>
+        <div class="progress-section">
+            <div class="progress-bar-lg">
+                <div class="progress-fill" id="live-banner-progress" style="width: 0%;"></div>
+            </div>
+            <div class="progress-labels">
+                <span id="live-banner-file" class="progress-detail">Initializing</span>
+                <span id="live-banner-pct" class="progress-text">0%</span>
+            </div>
+        </div>
+    </div>
+</div>
+
 <!-- Active Jobs (with progress) -->
-<div class="section-header" id="active-section" style="display:none">
+<div class="section-header" id="active-section" style="display:none; margin-top:24px;">
     <h2>🔥 Active Jobs</h2>
 </div>
 <div class="active-jobs-list" id="active-jobs"></div>
 
-<!-- All Jobs -->
+<!-- Raw Logs Terminal -->
+<div class="section-header" style="margin-top:24px; display:flex; align-items:center; justify-content:space-between;">
+    <h2>Terminal: Worker Logs</h2>
+</div>
+<div class="terminal-container" style="background:#000; color:#0f0; padding:16px; border-radius:8px; font-family:monospace; height:250px; overflow-y:auto; font-size:12px; white-space:pre-wrap;" id="raw-logs-terminal">
+    <div style="opacity:0.5;">Connecting to worker stream...</div>
+</div><!-- All Jobs -->
 <div class="section-header" style="display:flex; align-items:center; justify-content:space-between; margin-top:24px;">
     <h2>All Jobs</h2>
     <button class="btn btn-sm btn-secondary" onclick="loadDashboard()" title="Refresh">
@@ -90,12 +116,63 @@
     const ACTIVE_STATUSES = ['ingesting', 'detecting_scenes', 'analyzing', 'scoring', 'assembling', 'enhancing'];
 
     let refreshInterval = null;
+    let logsWs = null;
 
     document.addEventListener('DOMContentLoaded', () => {
         loadDashboard();
         // Auto-refresh every 5 seconds
         refreshInterval = setInterval(loadDashboard, 5000);
+        connectLogsWS();
     });
+
+    function connectLogsWS() {
+        if (logsWs) return;
+        try {
+            const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+            logsWs = new WebSocket(`${proto}//${location.host}/ws/logs/worker`);
+            const terminal = document.getElementById('raw-logs-terminal');
+            
+            logsWs.onmessage = (e) => {
+                if (terminal.children.length > 0 && terminal.children[0].textContent.includes('Connecting')) {
+                    terminal.innerHTML = '';
+                }
+                const text = e.data;
+                // Add new line
+                const fragment = document.createDocumentFragment();
+                const div = document.createElement('div');
+                div.textContent = text;
+                
+                // Very basic colorization
+                if (text.includes('ERROR') || text.includes('Exception') || text.includes('Failed')) {
+                    div.style.color = '#ff4444';
+                } else if (text.includes('WARNING')) {
+                    div.style.color = '#ffbb33';
+                } else if (text.includes('INFO')) {
+                    div.style.color = '#33b5e5';
+                }
+                
+                fragment.appendChild(div);
+                terminal.appendChild(fragment);
+                
+                // Keep max 200 lines
+                while (terminal.childNodes.length > 200) {
+                    terminal.removeChild(terminal.firstChild);
+                }
+                
+                // Auto scroll 
+                terminal.scrollTop = terminal.scrollHeight;
+            };
+            logsWs.onclose = () => {
+                logsWs = null;
+                setTimeout(connectLogsWS, 5000);
+            };
+            logsWs.onerror = () => {
+                logsWs = null;
+            };
+        } catch (e) {
+            console.error('Logs WS error:', e);
+        }
+    }
 
     async function loadDashboard() {
         try {

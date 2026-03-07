@@ -14,6 +14,7 @@ from app.api.routes_clips import router as clips_router
 from app.api.routes_highlights import router as highlights_router
 from app.api.routes_config import router as config_router
 from app.api.routes_browse import router as browse_router
+from app.api.routes_gpu import router as gpu_router
 from app.api.websocket import router as ws_router
 
 
@@ -54,6 +55,7 @@ def create_app() -> FastAPI:
     application.include_router(highlights_router, prefix="/api", tags=["Highlights"])
     application.include_router(config_router, prefix="/api", tags=["Config"])
     application.include_router(browse_router, tags=["Browse"])
+    application.include_router(gpu_router, prefix="/api", tags=["GPU"])
     application.include_router(ws_router, tags=["WebSocket"])
 
     # Template engine
@@ -78,9 +80,12 @@ def create_app() -> FastAPI:
 
     @application.get("/jobs/{job_id}", response_class=HTMLResponse)
     async def job_detail_page(request: Request, job_id: str):
+        settings = get_settings()
         return templates.TemplateResponse("job_detail.html", {
             "request": request,
             "job_id": job_id,
+            "tag_vocabulary": settings.default_tag_vocabulary,
+            "settings": settings,
         })
 
     @application.get("/jobs/{job_id}/clips", response_class=HTMLResponse)

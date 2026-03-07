@@ -18,29 +18,31 @@ class Settings(BaseSettings):
     output_dir: str = "/app/data/outputs"
     model_cache_dir: str = "/app/data/models"
 
-    # Scene Detection
-    scene_detect_threshold: float = 27.0
-    scene_detect_method: str = "content"  # "content" or "adaptive"
+    # Scene Detection — TransNetV2 (GPU)
+    scene_detect_threshold: float = 0.5  # probability threshold (0-1) for shot boundary
+    scene_detect_method: str = "transnetv2"  # "transnetv2" (GPU) — fallback: uniform segments
     min_scene_duration_sec: float = 1.0
 
-    # CLIP
-    clip_model: str = "ViT-B-32"
-    clip_pretrained: str = "openai"
-    clip_sample_frames: int = 8
-    clip_confidence_threshold: float = 0.15
-    clip_top_k_tags: int = 5
+    # CLIP — Default to "auto" to scale based on VRAM
+    clip_model: str = "auto"
+    clip_pretrained: str = "auto"
+    clip_similarity_threshold: float = 0.97  # Threshold for visual deduplication
+    clip_sample_frames: int = 16
+    clip_confidence_threshold: float = 0.12
+    clip_top_k_tags: int = 8
 
-    # YOLOv8
-    yolo_model: str = "yolov8m.pt"
-    yolo_confidence_threshold: float = 0.5
-    yolo_sample_frames: int = 8
+    # YOLOv8 — Default to "auto" to scale based on VRAM
+    yolo_model: str = "auto"
+    yolo_confidence_threshold: float = 0.35
+    yolo_sample_frames: int = 12
+    yolo_imgsz: int = 1280  # Full HD inference — catches small/distant objects
 
-    # Whisper
-    whisper_model: str = "medium"
+    # Whisper — Default to "auto" to scale based on VRAM
+    whisper_model: str = "auto"
     whisper_language: Optional[str] = None  # Auto-detect
 
-    # Motion Analysis
-    motion_sample_pairs: int = 10
+    # Motion Analysis — more sample pairs = smoother motion profile
+    motion_sample_pairs: int = 20
 
     # Scoring Weights
     weight_activity_relevance: float = 0.30

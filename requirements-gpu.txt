@@ -5,3 +5,4 @@ torchvision==0.20.1
 open-clip-torch==2.29.0
 ultralytics==8.3.57
 openai-whisper==20240930
+transnetv2-pytorch==1.0.5

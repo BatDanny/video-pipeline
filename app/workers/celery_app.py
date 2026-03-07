@@ -17,6 +17,9 @@ celery_app.conf.update(
     accept_content=["json"],
     result_serializer="json",
 
+    # Broker settings
+    broker_connection_retry_on_startup=True,
+
     # Task behavior
     task_track_started=True,
     task_acks_late=True,
@@ -35,9 +38,6 @@ celery_app.conf.update(
     enable_utc=True,
 )
 
-# Auto-discover tasks in pipeline modules
-celery_app.autodiscover_tasks([
-    "app.pipeline",
-    "app.pipeline.analysis",
-    "app.pipeline.enhancement",
-])
+celery_app.conf.imports = [
+    "app.pipeline.orchestrator"
+]
