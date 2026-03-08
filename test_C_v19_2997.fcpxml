@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE fcpxml>
+<fcpxml version="1.9">
+  <resources>
+    <format id="r1" name="FFVideoFormat4K2997" width="3840" height="2160" frameDuration="1001/30000s"/>
+    <asset id="r2" name="GX010336.MP4" start="0/1s" duration="8961452/30000s" hasVideo="1" hasAudio="1" format="r1">
+      <media-rep kind="original-media" src="file:///mnt/nas/gopro/Vail 2026/GX010336.MP4"/>
+    </asset>
+  </resources>
+  <library>
+    <event name="Test C">
+      <project name="TestC_v19_2997">
+        <sequence duration="1501500/30000s" format="r1" tcStart="0/1s" tcFormat="NDF">
+          <spine>
+            <asset-clip ref="r2" offset="0/30000s" name="Clip 01" start="0/30000s" duration="1501500/30000s" tcFormat="NDF"/>
+          </spine>
+        </sequence>
+      </project>
+    </event>
+  </library>
+</fcpxml>

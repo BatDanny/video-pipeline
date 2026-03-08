@@ -1,8 +1,6 @@
 """FCPXML 1.11 builder - generates Final Cut Pro / DaVinci Resolve compatible timelines."""
 
-import math
 import logging
-from typing import Optional
 from lxml import etree
 
 logger = logging.getLogger(__name__)
@@ -16,93 +14,84 @@ FCPX_SEQUENCE_FORMATS = {
     # 1080p formats
     (1920, 1080): {
         23.976: "FFVideoFormat1080p2398",
-        24.0: "FFVideoFormat1080p24",
-        25.0: "FFVideoFormat1080p25",
-        29.97: "FFVideoFormat1080p2997",
-        30.0: "FFVideoFormat1080p30",
-        50.0: "FFVideoFormat1080p50",
-        59.94: "FFVideoFormat1080p5994",
-        60.0: "FFVideoFormat1080p60",
+        24.0:   "FFVideoFormat1080p24",
+        25.0:   "FFVideoFormat1080p25",
+        29.97:  "FFVideoFormat1080p2997",
+        30.0:   "FFVideoFormat1080p30",
+        50.0:   "FFVideoFormat1080p50",
+        59.94:  "FFVideoFormat1080p5994",
+        60.0:   "FFVideoFormat1080p60",
     },
-    # 4K formats
+    # 4K UHD formats
     (3840, 2160): {
         23.976: "FFVideoFormat4K2398",
-        24.0: "FFVideoFormat4K24",
-        25.0: "FFVideoFormat4K25",
-        29.97: "FFVideoFormat4K2997",
-        30.0: "FFVideoFormat4K30",
-        50.0: "FFVideoFormat4K50",
-        59.94: "FFVideoFormat4K5994",
-        60.0: "FFVideoFormat4K60",
+        24.0:   "FFVideoFormat4K24",
+        25.0:   "FFVideoFormat4K25",
+        29.97:  "FFVideoFormat4K2997",
+        30.0:   "FFVideoFormat4K30",
+        50.0:   "FFVideoFormat4K50",
+        59.94:  "FFVideoFormat4K5994",
+        60.0:   "FFVideoFormat4K60",
     },
     # 720p formats
     (1280, 720): {
         23.976: "FFVideoFormat720p2398",
-        24.0: "FFVideoFormat720p24",
-        25.0: "FFVideoFormat720p25",
-        29.97: "FFVideoFormat720p2997",
-        30.0: "FFVideoFormat720p30",
-        50.0: "FFVideoFormat720p50",
-        59.94: "FFVideoFormat720p5994",
-        60.0: "FFVideoFormat720p60",
+        24.0:   "FFVideoFormat720p24",
+        25.0:   "FFVideoFormat720p25",
+        29.97:  "FFVideoFormat720p2997",
+        30.0:   "FFVideoFormat720p30",
+        50.0:   "FFVideoFormat720p50",
+        59.94:  "FFVideoFormat720p5994",
+        60.0:   "FFVideoFormat720p60",
     },
     # 5K formats
     (5120, 2880): {
         23.976: "FFVideoFormat5K2398",
-        24.0: "FFVideoFormat5K24",
-        25.0: "FFVideoFormat5K25",
-        29.97: "FFVideoFormat5K2997",
-        30.0: "FFVideoFormat5K30",
-        50.0: "FFVideoFormat5K50",
-        59.94: "FFVideoFormat5K5994",
-        60.0: "FFVideoFormat5K60",
+        24.0:   "FFVideoFormat5K24",
+        25.0:   "FFVideoFormat5K25",
+        29.97:  "FFVideoFormat5K2997",
+        30.0:   "FFVideoFormat5K30",
+        50.0:   "FFVideoFormat5K50",
+        59.94:  "FFVideoFormat5K5994",
+        60.0:   "FFVideoFormat5K60",
     },
 }
 
-# Maximum supported sequence frame rate
 MAX_SEQUENCE_FPS = 60.0
 
 
 def get_supported_sequence_fps(source_fps: float) -> float:
-    """Get the closest FCPX-supported frame rate for the sequence.
+    """Return the closest FCPX-supported sequence frame rate.
 
-    CRITICAL: FCPX does NOT support frame rates > 60fps for sequences.
+    FCPX does NOT support frame rates > 60fps for sequences.
     For 119.88fps GoPro footage, use 59.94fps sequence.
     """
+    standard_rates = [23.976, 24.0, 25.0, 29.97, 30.0, 50.0, 59.94, 60.0]
     if source_fps <= MAX_SEQUENCE_FPS:
-        # Source is within supported range, use as-is
-        # Round to nearest standard frame rate
-        standard_rates = [23.976, 24.0, 25.0, 29.97, 30.0, 50.0, 59.94, 60.0]
         closest = min(standard_rates, key=lambda x: abs(x - source_fps))
         if abs(closest - source_fps) < 0.5:
             return closest
         return source_fps
-
     # For high frame rates (>60fps), downconvert to 59.94fps
-    # This allows slow-motion in post while maintaining compatibility
     return 59.94
 
 
 def get_sequence_format_name(width: int, height: int, fps: float) -> str:
-    """Get the FCPX format name for a supported sequence frame rate."""
+    """Return the FCPX format name for a resolution/fps combo, or a fallback."""
     resolution_key = (width, height)
-
-    if resolution_key not in FCPX_SEQUENCE_FORMATS:
-        raise ValueError(f"Unsupported resolution: {width}x{height}")
-
-    formats = FCPX_SEQUENCE_FORMATS[resolution_key]
-
-    # Find matching format
-    for supported_fps, format_name in formats.items():
-        if abs(fps - supported_fps) < 0.01:
-            return format_name
-
-    # Fallback to 59.94fps if not found
-    return formats[59.94]
+    formats = FCPX_SEQUENCE_FORMATS.get(resolution_key)
+    if formats:
+        for supported_fps, format_name in formats.items():
+            if abs(fps - supported_fps) < 0.01:
+                return format_name
+        # Unknown fps for known resolution — fall back to 59.94
+        return formats[59.94]
+    # Unknown resolution — return None so the caller omits the name attribute
+    return None
 
 
 def get_timebase(fps: float) -> int:
-    """Get timebase for a frame rate."""
+    """Return the timebase denominator for a given frame rate."""
     if abs(fps - 23.976) < 0.01:
         return 24000
     elif abs(fps - 29.97) < 0.01:
@@ -114,14 +103,14 @@ def get_timebase(fps: float) -> int:
 
 
 def get_ticks_per_frame(fps: float) -> int:
-    """Get ticks per frame (1001 for NTSC, 1 for integer fps)."""
+    """Return ticks per frame (1001 for NTSC drop-frame rates, 1 otherwise)."""
     if abs(fps - 23.976) < 0.01 or abs(fps - 29.97) < 0.01 or abs(fps - 59.94) < 0.01:
         return 1001
     return 1
 
 
 def get_exact_fps(fps: float) -> float:
-    """Get exact frame rate for calculations."""
+    """Return the exact fractional frame rate for NTSC rates."""
     if abs(fps - 23.976) < 0.01:
         return 24000 / 1001
     elif abs(fps - 29.97) < 0.01:
@@ -132,20 +121,12 @@ def get_exact_fps(fps: float) -> float:
 
 
 def seconds_to_rational(seconds: float, fps: float) -> str:
-    """Convert seconds to frame-aligned rational time.
-
-    CRITICAL: All tick values must be multiples of the ticks-per-frame.
-    """
+    """Convert seconds to a frame-aligned FCPXML rational time string."""
     timebase = get_timebase(fps)
     ticks_per_frame = get_ticks_per_frame(fps)
     exact_fps = get_exact_fps(fps)
-
-    # Calculate FRAMES first (ensures frame alignment)
     frames = int(round(seconds * exact_fps))
-
-    # Convert frames to ticks
     ticks = frames * ticks_per_frame
-
     return f"{ticks}/{timebase}s"
 
 
@@ -174,8 +155,6 @@ class FCPXMLBuilder:
             FCPXML XML string
         """
         root = etree.Element("fcpxml", version="1.11")
-
-        # --- Resources ---
         resources = etree.SubElement(root, "resources")
 
         video_assets = {}  # video_id -> asset_id
@@ -187,8 +166,13 @@ class FCPXMLBuilder:
             _res_counter += 1
             return rid
 
-        # Get resolution from first clip
+        # Determine sequence fps (downconvert >60fps sources for FCPX compatibility)
         first_video = clips_data[0].get("video") if clips_data else None
+        source_fps = first_video.fps if first_video else 30.0
+        sequence_fps = get_supported_sequence_fps(source_fps)
+        logger.info(f"Source FPS: {source_fps}, Sequence FPS: {sequence_fps}")
+
+        # Get resolution from first video
         width, height = 1920, 1080
         if first_video and first_video.resolution and "x" in first_video.resolution:
             parts = first_video.resolution.split("x")
@@ -197,31 +181,25 @@ class FCPXMLBuilder:
             except ValueError:
                 pass
 
-        # ================================================================
-        # CRITICAL FIX: Use a SUPPORTED sequence frame rate!
-        # For 119.88fps source, convert to 59.94fps sequence
-        # ================================================================
-        source_fps = first_video.fps if first_video else 30.0
-        sequence_fps = get_supported_sequence_fps(source_fps)
         sequence_timebase = get_timebase(sequence_fps)
         sequence_ticks_per_frame = get_ticks_per_frame(sequence_fps)
         sequence_exact_fps = get_exact_fps(sequence_fps)
 
-        logger.info(f"Source FPS: {source_fps}, Sequence FPS: {sequence_fps}")
-
-        # Create the SEQUENCE format (using supported frame rate)
+        # CRITICAL: sequence format goes FIRST in <resources> and all assets reference it.
+        # FCP rejects a sequence whose format is not declared before assets or is unused.
         sequence_format_id = next_rid()
         sequence_format_name = get_sequence_format_name(width, height, sequence_fps)
+        fmt_attribs = {
+            "id": sequence_format_id,
+            "width": str(width),
+            "height": str(height),
+            "frameDuration": seconds_to_rational(1.0 / sequence_fps, sequence_fps),
+        }
+        if sequence_format_name:
+            fmt_attribs["name"] = sequence_format_name
+        etree.SubElement(resources, "format", **fmt_attribs)
 
-        etree.SubElement(resources, "format",
-            id=sequence_format_id,
-            name=sequence_format_name,
-            width=str(width),
-            height=str(height),
-            frameDuration=seconds_to_rational(1.0 / sequence_fps, sequence_fps),
-        )
-
-        # Create ASSET resources
+        # Emit <asset> resources — all referencing the sequence format
         for i, cd in enumerate(clips_data):
             video = cd.get("video")
             if not video or video.id in video_assets:
@@ -230,10 +208,7 @@ class FCPXMLBuilder:
             asset_id = next_rid()
             video_assets[video.id] = asset_id
 
-            # Asset duration in SEQUENCE timebase
-            duration_sec = video.duration_sec or 0
-            duration_rational = seconds_to_rational(duration_sec, sequence_fps)
-
+            duration_rational = seconds_to_rational(video.duration_sec or 0, sequence_fps)
             asset = etree.SubElement(resources, "asset",
                 id=asset_id,
                 name=video.filename if video.filename else f"Asset {i+1}",
@@ -241,9 +216,8 @@ class FCPXMLBuilder:
                 duration=duration_rational,
                 hasVideo="1",
                 hasAudio="1",
-                format=sequence_format_id,  # Use sequence format for all assets
+                format=sequence_format_id,
             )
-
             etree.SubElement(asset, "media-rep",
                 kind="original-media",
                 src=f"file://{video.filepath}",
@@ -256,7 +230,6 @@ class FCPXMLBuilder:
         project = etree.SubElement(event, "project",
             name=self.reel_name)
 
-        # Calculate total duration in SEQUENCE timebase
         total_duration = sum(cd["clip"].duration_sec for cd in clips_data if cd.get("clip"))
 
         sequence = etree.SubElement(project, "sequence",
@@ -269,7 +242,7 @@ class FCPXMLBuilder:
         spine = etree.SubElement(sequence, "spine")
 
         # --- Add clips to spine ---
-        timeline_offset_frames = 0  # Track in FRAMES
+        timeline_offset_frames = 0
 
         for idx, cd in enumerate(clips_data):
             clip = cd.get("clip")
@@ -279,7 +252,6 @@ class FCPXMLBuilder:
 
             asset_id = video_assets.get(video.id)
 
-            # Build clip name
             top_tags = ""
             if clip.tags:
                 tag_names = [t.get("tag", "") for t in clip.tags[:3]]
@@ -290,7 +262,7 @@ class FCPXMLBuilder:
                 clip_name += f" - {top_tags}"
             clip_name += f" (score: {clip.effective_score:.0f})"
 
-            # Add transition if needed
+            # Add transition before clip (if not first and not "cut")
             if idx > 0 and self.transition_type != "cut":
                 trans_frames = int(round(self.transition_duration_sec * sequence_exact_fps))
                 trans_ticks = trans_frames * sequence_ticks_per_frame
@@ -307,8 +279,7 @@ class FCPXMLBuilder:
                         duration=trans_dur,
                     )
 
-            # Calculate in FRAMES first, then convert to ticks
-            # This ensures frame alignment
+            # Calculate in FRAMES first for alignment, then convert to ticks
             clip_duration_frames = int(round(clip.duration_sec * sequence_exact_fps))
             offset_frames = timeline_offset_frames
             start_frames = int(round(clip.start_sec * sequence_exact_fps))
