@@ -1,4 +1,4 @@
-"""FCPXML 1.11 builder — generates Final Cut Pro / DaVinci Resolve compatible timelines."""
+"""FCPXML 1.11 builder - generates Final Cut Pro / DaVinci Resolve compatible timelines."""
 
 import math
 import logging
@@ -8,120 +8,145 @@ from lxml import etree
 logger = logging.getLogger(__name__)
 
 
-def _get_timebase(fps: float) -> int:
-    """Get the timebase denominator for a given frame rate.
-    
-    This is used for rational time calculations.
+# ================================================================
+# FCPX-SUPPORTED SEQUENCE FORMATS
+# ================================================================
+
+FCPX_SEQUENCE_FORMATS = {
+    # 1080p formats
+    (1920, 1080): {
+        23.976: "FFVideoFormat1080p2398",
+        24.0: "FFVideoFormat1080p24",
+        25.0: "FFVideoFormat1080p25",
+        29.97: "FFVideoFormat1080p2997",
+        30.0: "FFVideoFormat1080p30",
+        50.0: "FFVideoFormat1080p50",
+        59.94: "FFVideoFormat1080p5994",
+        60.0: "FFVideoFormat1080p60",
+    },
+    # 4K formats
+    (3840, 2160): {
+        23.976: "FFVideoFormat4K2398",
+        24.0: "FFVideoFormat4K24",
+        25.0: "FFVideoFormat4K25",
+        29.97: "FFVideoFormat4K2997",
+        30.0: "FFVideoFormat4K30",
+        50.0: "FFVideoFormat4K50",
+        59.94: "FFVideoFormat4K5994",
+        60.0: "FFVideoFormat4K60",
+    },
+    # 720p formats
+    (1280, 720): {
+        23.976: "FFVideoFormat720p2398",
+        24.0: "FFVideoFormat720p24",
+        25.0: "FFVideoFormat720p25",
+        29.97: "FFVideoFormat720p2997",
+        30.0: "FFVideoFormat720p30",
+        50.0: "FFVideoFormat720p50",
+        59.94: "FFVideoFormat720p5994",
+        60.0: "FFVideoFormat720p60",
+    },
+    # 5K formats
+    (5120, 2880): {
+        23.976: "FFVideoFormat5K2398",
+        24.0: "FFVideoFormat5K24",
+        25.0: "FFVideoFormat5K25",
+        29.97: "FFVideoFormat5K2997",
+        30.0: "FFVideoFormat5K30",
+        50.0: "FFVideoFormat5K50",
+        59.94: "FFVideoFormat5K5994",
+        60.0: "FFVideoFormat5K60",
+    },
+}
+
+# Maximum supported sequence frame rate
+MAX_SEQUENCE_FPS = 60.0
+
+
+def get_supported_sequence_fps(source_fps: float) -> float:
+    """Get the closest FCPX-supported frame rate for the sequence.
+
+    CRITICAL: FCPX does NOT support frame rates > 60fps for sequences.
+    For 119.88fps GoPro footage, use 59.94fps sequence.
     """
+    if source_fps <= MAX_SEQUENCE_FPS:
+        # Source is within supported range, use as-is
+        # Round to nearest standard frame rate
+        standard_rates = [23.976, 24.0, 25.0, 29.97, 30.0, 50.0, 59.94, 60.0]
+        closest = min(standard_rates, key=lambda x: abs(x - source_fps))
+        if abs(closest - source_fps) < 0.5:
+            return closest
+        return source_fps
+
+    # For high frame rates (>60fps), downconvert to 59.94fps
+    # This allows slow-motion in post while maintaining compatibility
+    return 59.94
+
+
+def get_sequence_format_name(width: int, height: int, fps: float) -> str:
+    """Get the FCPX format name for a supported sequence frame rate."""
+    resolution_key = (width, height)
+
+    if resolution_key not in FCPX_SEQUENCE_FORMATS:
+        raise ValueError(f"Unsupported resolution: {width}x{height}")
+
+    formats = FCPX_SEQUENCE_FORMATS[resolution_key]
+
+    # Find matching format
+    for supported_fps, format_name in formats.items():
+        if abs(fps - supported_fps) < 0.01:
+            return format_name
+
+    # Fallback to 59.94fps if not found
+    return formats[59.94]
+
+
+def get_timebase(fps: float) -> int:
+    """Get timebase for a frame rate."""
     if abs(fps - 23.976) < 0.01:
         return 24000
     elif abs(fps - 29.97) < 0.01:
         return 30000
     elif abs(fps - 59.94) < 0.01:
         return 60000
-    elif abs(fps - 119.88) < 0.01:
-        return 120000
     else:
         return int(round(fps))
 
 
-def _get_ticks_per_frame(fps: float) -> int:
-    """Get ticks per frame for frame alignment.
-    
-    For NTSC frame rates, each frame is 1001 ticks.
-    For integer frame rates, each frame is 1 tick.
-    """
+def get_ticks_per_frame(fps: float) -> int:
+    """Get ticks per frame (1001 for NTSC, 1 for integer fps)."""
+    if abs(fps - 23.976) < 0.01 or abs(fps - 29.97) < 0.01 or abs(fps - 59.94) < 0.01:
+        return 1001
+    return 1
+
+
+def get_exact_fps(fps: float) -> float:
+    """Get exact frame rate for calculations."""
     if abs(fps - 23.976) < 0.01:
-        return 1001
+        return 24000 / 1001
     elif abs(fps - 29.97) < 0.01:
-        return 1001
+        return 30000 / 1001
     elif abs(fps - 59.94) < 0.01:
-        return 1001
-    elif abs(fps - 119.88) < 0.01:
-        return 1001
-    else:
-        return 1
+        return 60000 / 1001
+    return fps
 
 
-def _get_exact_fps(fps: float) -> float:
-    """Get the exact frame rate value for calculations.
-    
-    NTSC frame rates are actually X/1001 Hz, not the rounded values.
+def seconds_to_rational(seconds: float, fps: float) -> str:
+    """Convert seconds to frame-aligned rational time.
+
+    CRITICAL: All tick values must be multiples of the ticks-per-frame.
     """
-    if abs(fps - 23.976) < 0.01:
-        return 24000 / 1001  # 23.976023...
-    elif abs(fps - 29.97) < 0.01:
-        return 30000 / 1001  # 29.970029...
-    elif abs(fps - 59.94) < 0.01:
-        return 60000 / 1001  # 59.940059...
-    elif abs(fps - 119.88) < 0.01:
-        return 120000 / 1001  # 119.880119...
-    else:
-        return fps
+    timebase = get_timebase(fps)
+    ticks_per_frame = get_ticks_per_frame(fps)
+    exact_fps = get_exact_fps(fps)
 
+    # Calculate FRAMES first (ensures frame alignment)
+    frames = int(round(seconds * exact_fps))
 
-def _seconds_to_rational(seconds: float, fps: float = 30.0) -> str:
-    """Convert seconds to FCPXML rational time format with FRAME ALIGNMENT.
-
-    CRITICAL: All tick values must be aligned to frame boundaries.
-    For NTSC frame rates, this means ticks must be multiples of 1001.
-    
-    The formula is:
-    1. Convert seconds to FRAMES (round to nearest frame)
-    2. Multiply frames by ticks_per_frame (1001 for NTSC, 1 for integer fps)
-    """
-    if fps <= 0:
-        fps = 30.0
-
-    timebase = _get_timebase(fps)
-    ticks_per_frame = _get_ticks_per_frame(fps)
-    exact_fps = _get_exact_fps(fps)
-
-    # STEP 1: Calculate total frames (round to nearest frame)
-    total_frames = int(round(seconds * exact_fps))
-    
-    # STEP 2: Convert frames to ticks (this ensures frame alignment)
-    ticks = total_frames * ticks_per_frame
+    # Convert frames to ticks
+    ticks = frames * ticks_per_frame
 
     return f"{ticks}/{timebase}s"
-
-
-def _fps_code(fps: float) -> str:
-    """Return FCP-style fps code (e.g. 2997, 5994, 11988, 30)."""
-    if abs(fps - int(fps)) < 0.01:
-        return str(int(fps))
-    return f"{fps:.2f}".replace(".", "")
-
-
-def _get_format_name(width: int, height: int, fps: float) -> Optional[str]:
-    """Generate FCPX-compatible format name.
-
-    FCPX recognizes specific format name patterns:
-    - FFVideoFormat1080p{fps} for 1920x1080
-    - FFVideoFormat720p{fps} for 1280x720
-    - FFVideoFormat4K{fps} for 3840x2160
-    - FFVideoFormat5K{fps} for 5120x2880
-
-    DO NOT use format names like "FFVideoFormat3840x2160p11988".
-    If the FPS is higher than 60, we omit the predefined name entirely,
-    forcing Final Cut Pro to create a custom format that won't fail DTD validation.
-    """
-    if fps > 60.01:
-        return None
-
-    fps_code = _fps_code(fps)
-
-    if height == 1080 and width == 1920:
-        return f"FFVideoFormat1080p{fps_code}"
-    elif height == 2160 and width == 3840:
-        return f"FFVideoFormat4K{fps_code}"
-    elif height == 720 and width == 1280:
-        return f"FFVideoFormat720p{fps_code}"
-    elif height == 2880 and width == 5120:
-        return f"FFVideoFormat5K{fps_code}"
-    else:
-        # For non-standard resolutions, don't use FFVideoFormat prefix
-        return None
 
 
 class FCPXMLBuilder:
@@ -148,75 +173,67 @@ class FCPXMLBuilder:
         Returns:
             FCPXML XML string
         """
-        root = etree.Element("fcpxml", version="1.9")
+        root = etree.Element("fcpxml", version="1.11")
 
         # --- Resources ---
         resources = etree.SubElement(root, "resources")
 
-        # Track unique source videos and create asset/format resources.
-        # All resources share one sequential counter (r1, r2, ...) — no collisions.
         video_assets = {}  # video_id -> asset_id
-        format_ids = {}    # format_key -> format_id
         _res_counter = 0
 
-        def _next_rid() -> str:
+        def next_rid():
             nonlocal _res_counter
+            rid = f"r{_res_counter}"
             _res_counter += 1
-            return f"r{_res_counter}"
+            return rid
 
-        # First pass: collect unique formats and emit <format> resources
-        for cd in clips_data:
-            video = cd.get("video")
-            if not video:
-                continue
+        # Get resolution from first clip
+        first_video = clips_data[0].get("video") if clips_data else None
+        width, height = 1920, 1080
+        if first_video and first_video.resolution and "x" in first_video.resolution:
+            parts = first_video.resolution.split("x")
+            try:
+                width, height = int(parts[0]), int(parts[1])
+            except ValueError:
+                pass
 
-            width, height = 1920, 1080
-            if video.resolution and "x" in video.resolution:
-                parts = video.resolution.split("x")
-                try:
-                    width, height = int(parts[0]), int(parts[1])
-                except ValueError:
-                    pass
+        # ================================================================
+        # CRITICAL FIX: Use a SUPPORTED sequence frame rate!
+        # For 119.88fps source, convert to 59.94fps sequence
+        # ================================================================
+        source_fps = first_video.fps if first_video else 30.0
+        sequence_fps = get_supported_sequence_fps(source_fps)
+        sequence_timebase = get_timebase(sequence_fps)
+        sequence_ticks_per_frame = get_ticks_per_frame(sequence_fps)
+        sequence_exact_fps = get_exact_fps(sequence_fps)
 
-            fps = video.fps or 30.0
-            fmt_key = f"{width}x{height}@{fps}"
+        logger.info(f"Source FPS: {source_fps}, Sequence FPS: {sequence_fps}")
 
-            if fmt_key not in format_ids:
-                fmt_id = _next_rid()
-                format_ids[fmt_key] = fmt_id
-                fmt_name = _get_format_name(width, height, fps)
-                attribs = {
-                    "id": fmt_id,
-                    "width": str(width),
-                    "height": str(height),
-                    "frameDuration": _seconds_to_rational(1.0 / fps, fps),
-                }
-                if fmt_name:
-                    attribs["name"] = fmt_name
-                    
-                etree.SubElement(resources, "format", **attribs)
+        # Create the SEQUENCE format (using supported frame rate)
+        sequence_format_id = next_rid()
+        sequence_format_name = get_sequence_format_name(width, height, sequence_fps)
 
-        # Second pass: emit <asset> resources
+        etree.SubElement(resources, "format",
+            id=sequence_format_id,
+            name=sequence_format_name,
+            width=str(width),
+            height=str(height),
+            frameDuration=seconds_to_rational(1.0 / sequence_fps, sequence_fps),
+        )
+
+        # Create ASSET resources
         for i, cd in enumerate(clips_data):
             video = cd.get("video")
             if not video or video.id in video_assets:
                 continue
 
-            asset_id = _next_rid()
+            asset_id = next_rid()
             video_assets[video.id] = asset_id
 
-            width, height = 1920, 1080
-            if video.resolution and "x" in video.resolution:
-                parts = video.resolution.split("x")
-                try:
-                    width, height = int(parts[0]), int(parts[1])
-                except ValueError:
-                    pass
+            # Asset duration in SEQUENCE timebase
+            duration_sec = video.duration_sec or 0
+            duration_rational = seconds_to_rational(duration_sec, sequence_fps)
 
-            fps = video.fps or 30.0
-            fmt_key = f"{width}x{height}@{fps}"
-
-            duration_rational = _seconds_to_rational(video.duration_sec or 0, fps)
             asset = etree.SubElement(resources, "asset",
                 id=asset_id,
                 name=video.filename if video.filename else f"Asset {i+1}",
@@ -224,7 +241,7 @@ class FCPXMLBuilder:
                 duration=duration_rational,
                 hasVideo="1",
                 hasAudio="1",
-                format=format_ids[fmt_key],
+                format=sequence_format_id,  # Use sequence format for all assets
             )
 
             etree.SubElement(asset, "media-rep",
@@ -239,19 +256,12 @@ class FCPXMLBuilder:
         project = etree.SubElement(event, "project",
             name=self.reel_name)
 
-        # Calculate total duration
+        # Calculate total duration in SEQUENCE timebase
         total_duration = sum(cd["clip"].duration_sec for cd in clips_data if cd.get("clip"))
 
-        # Determine primary format (from first clip)
-        primary_format = list(format_ids.values())[0] if format_ids else "r1"
-        primary_fps = clips_data[0]["video"].fps if clips_data and clips_data[0].get("video") else 30.0
-        # FIX #2: Get primary timebase for all spine elements
-        primary_timebase = _get_timebase(primary_fps)
-        primary_ticks_per_frame = _get_ticks_per_frame(primary_fps)
-
         sequence = etree.SubElement(project, "sequence",
-            duration=_seconds_to_rational(total_duration, primary_fps),
-            format=primary_format,
+            duration=seconds_to_rational(total_duration, sequence_fps),
+            format=sequence_format_id,
             tcStart="0/1s",
             tcFormat="NDF",
         )
@@ -259,7 +269,7 @@ class FCPXMLBuilder:
         spine = etree.SubElement(sequence, "spine")
 
         # --- Add clips to spine ---
-        timeline_offset_frames = 0  # Track in FRAMES, not seconds
+        timeline_offset_frames = 0  # Track in FRAMES
 
         for idx, cd in enumerate(clips_data):
             clip = cd.get("clip")
@@ -267,13 +277,9 @@ class FCPXMLBuilder:
             if not clip or not video:
                 continue
 
-            asset_id = video_assets.get(video.id, "r1")
-            fps = video.fps or 30.0
-            clip_timebase = _get_timebase(fps)
-            clip_ticks_per_frame = _get_ticks_per_frame(fps)
-            clip_exact_fps = _get_exact_fps(fps)
+            asset_id = video_assets.get(video.id)
 
-            # Build clip name with tags and score
+            # Build clip name
             top_tags = ""
             if clip.tags:
                 tag_names = [t.get("tag", "") for t in clip.tags[:3]]
@@ -284,50 +290,42 @@ class FCPXMLBuilder:
                 clip_name += f" - {top_tags}"
             clip_name += f" (score: {clip.effective_score:.0f})"
 
-            # Add transition before clip (if not first and not "cut")
+            # Add transition if needed
             if idx > 0 and self.transition_type != "cut":
-                trans_frames = int(round(self.transition_duration_sec * _get_exact_fps(primary_fps)))
-                trans_ticks = trans_frames * primary_ticks_per_frame
-                trans_dur = f"{trans_ticks}/{primary_timebase}s"
+                trans_frames = int(round(self.transition_duration_sec * sequence_exact_fps))
+                trans_ticks = trans_frames * sequence_ticks_per_frame
+                trans_dur = f"{trans_ticks}/{sequence_timebase}s"
 
                 if self.transition_type == "crossfade":
-                    transition = etree.SubElement(spine, "transition",
+                    etree.SubElement(spine, "transition",
                         name="Cross Dissolve",
                         duration=trans_dur,
                     )
                 elif self.transition_type == "dip_to_black":
-                    transition = etree.SubElement(spine, "transition",
+                    etree.SubElement(spine, "transition",
                         name="Dip to Black",
                         duration=trans_dur,
                     )
 
-            # FIX #2 & #3: Calculate in FRAMES first, then convert to ticks
-            # This ensures frame alignment for ALL values
-            
-            # Clip duration in frames (primary sequence timebase)
-            clip_duration_frames = int(round(clip.duration_sec * _get_exact_fps(primary_fps)))
-            
-            # Offset on timeline (already in frames)
+            # Calculate in FRAMES first, then convert to ticks
+            # This ensures frame alignment
+            clip_duration_frames = int(round(clip.duration_sec * sequence_exact_fps))
             offset_frames = timeline_offset_frames
-            
-            # Start position in source asset (in clip's timebase)
-            start_frames = int(round(clip.start_sec * clip_exact_fps))
-            
-            # Convert to ticks
-            offset_ticks = offset_frames * primary_ticks_per_frame
-            duration_ticks = clip_duration_frames * primary_ticks_per_frame
-            start_ticks = start_frames * clip_ticks_per_frame
+            start_frames = int(round(clip.start_sec * sequence_exact_fps))
 
-            asset_clip = etree.SubElement(spine, "asset-clip",
+            offset_ticks = offset_frames * sequence_ticks_per_frame
+            duration_ticks = clip_duration_frames * sequence_ticks_per_frame
+            start_ticks = start_frames * sequence_ticks_per_frame
+
+            etree.SubElement(spine, "asset-clip",
                 ref=asset_id,
-                offset=f"{offset_ticks}/{primary_timebase}s",  # PRIMARY timebase, frame-aligned
+                offset=f"{offset_ticks}/{sequence_timebase}s",
                 name=clip_name,
-                start=f"{start_ticks}/{clip_timebase}s",  # ASSET timebase, frame-aligned
-                duration=f"{duration_ticks}/{primary_timebase}s",  # PRIMARY timebase, frame-aligned
+                start=f"{start_ticks}/{sequence_timebase}s",
+                duration=f"{duration_ticks}/{sequence_timebase}s",
                 tcFormat="NDF",
             )
 
-            # Update timeline offset (in frames)
             timeline_offset_frames += clip_duration_frames
 
         # Generate XML string
