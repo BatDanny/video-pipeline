@@ -18,7 +18,9 @@ ALLOWED_ROOTS = [
 
 
 def _is_path_allowed(path: str) -> bool:
-    """Check if path is under an allowed root directory."""
+    """Check if path is under an allowed root directory. Blocks symlinks."""
+    if os.path.islink(path):
+        return False
     real_path = os.path.realpath(path)
     return any(real_path.startswith(os.path.realpath(root)) for root in ALLOWED_ROOTS)
 
@@ -57,6 +59,8 @@ async def browse_directory(
             continue
 
         full_path = os.path.join(path, entry)
+        if os.path.islink(full_path):
+            continue
         try:
             stat = os.stat(full_path)
         except (OSError, PermissionError):

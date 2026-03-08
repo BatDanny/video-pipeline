@@ -15,7 +15,9 @@
 
 services:
   web:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile.web
     user: "${UID:-1000}:${GID:-1000}"
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 2 --reload
     ports:
@@ -29,22 +31,14 @@ services:
       - /mnt/nas/gopro:/mnt/nas/gopro:ro
     environment:
       - DATABASE_URL=sqlite:////app/data/db/pipeline.db
-      - REDIS_URL=redis://redis:6379/0
+      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379/0
       - UPLOAD_DIR=/app/data/uploads
       - OUTPUT_DIR=/app/data/outputs
       - MODEL_CACHE_DIR=/app/data/models
-      - NVIDIA_VISIBLE_DEVICES=all
     depends_on:
       redis:
         condition: service_started
     restart: unless-stopped
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [ gpu ]
     healthcheck:
       test: [ "CMD", "curl", "-f", "http://localhost:8000/" ]
       interval: 30s
@@ -52,8 +46,9 @@ services:
       retries: 3
 
   worker:
-    build: .
-    pid: "host"
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
     user: "${UID:-1000}:${GID:-1000}"
     command: bash -c "mkdir -p /app/data/logs && celery -A app.workers.celery_app worker --loglevel=info --concurrency=2 -Q pipeline,celery 2>&1 | tee /app/data/logs/worker.log"
     volumes:
@@ -65,7 +60,7 @@ services:
       - /mnt/nas/gopro:/mnt/nas/gopro:ro
     environment:
       - DATABASE_URL=sqlite:////app/data/db/pipeline.db
-      - REDIS_URL=redis://redis:6379/0
+      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379/0
       - UPLOAD_DIR=/app/data/uploads
       - OUTPUT_DIR=/app/data/outputs
       - MODEL_CACHE_DIR=/app/data/models
@@ -86,13 +81,12 @@ services:
 
   redis:
     image: redis:7-alpine
-    ports:
-      - "6379:6379"
+    command: redis-server --requirepass ${REDIS_PASSWORD}
     volumes:
       - redis-data:/data
     restart: unless-stopped
     healthcheck:
-      test: [ "CMD", "redis-cli", "ping" ]
+      test: [ "CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping" ]
       interval: 10s
       timeout: 3s
       retries: 5

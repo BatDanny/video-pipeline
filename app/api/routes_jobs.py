@@ -18,12 +18,24 @@ from app.config import get_settings
 
 router = APIRouter()
 
+# File upload validation
+ALLOWED_VIDEO_EXTS = {".mp4", ".mov", ".m4v", ".mts", ".m2ts"}
+MAX_UPLOAD_SIZE = 10 * 1024 * 1024 * 1024  # 10 GB
 
-def _job_to_response(job: Job, db: Session) -> JobResponse:
-    """Convert a Job ORM object to a response schema."""
-    video_count = db.query(func.count(Video.id)).filter(Video.job_id == job.id).scalar() or 0
-    clip_count = db.query(func.count(Clip.id)).filter(Clip.job_id == job.id).scalar() or 0
-    top_score = db.query(func.max(Clip.overall_score)).filter(Clip.job_id == job.id).scalar()
+
+def _job_to_response(job: Job, db: Session, stats: dict = None) -> JobResponse:
+    """Convert a Job ORM object to a response schema.
+
+    Args:
+        stats: Optional pre-computed {job_id: (video_count, clip_count, top_score)} dict
+               to avoid N+1 queries when listing multiple jobs.
+    """
+    if stats and job.id in stats:
+        video_count, clip_count, top_score = stats[job.id]
+    else:
+        video_count = db.query(func.count(Video.id)).filter(Video.job_id == job.id).scalar() or 0
+        clip_count = db.query(func.count(Clip.id)).filter(Clip.job_id == job.id).scalar() or 0
+        top_score = db.query(func.max(Clip.overall_score)).filter(Clip.job_id == job.id).scalar()
 
     return JobResponse(
         id=job.id,
@@ -73,15 +85,27 @@ async def create_job(
             raise HTTPException(400, f"Source path does not exist or is not a directory: {source_path}")
         source_dir = source_path
     elif files and len(files) > 0 and files[0].filename:
-        # File upload mode — save uploaded files
+        # File upload mode — save uploaded files with validation
         source_dir = os.path.join(settings.upload_dir, job_id)
         os.makedirs(source_dir, exist_ok=True)
-        for f in files:
-            if f.filename:
+        try:
+            for f in files:
+                if not f.filename:
+                    continue
+                ext = os.path.splitext(f.filename)[1].lower()
+                if ext not in ALLOWED_VIDEO_EXTS:
+                    raise HTTPException(400, f"Unsupported file type: {ext}. Allowed: {', '.join(sorted(ALLOWED_VIDEO_EXTS))}")
+                if f.size and f.size > MAX_UPLOAD_SIZE:
+                    raise HTTPException(400, f"File too large: {f.filename}. Maximum size is 10 GB.")
                 dest = os.path.join(source_dir, f.filename)
                 with open(dest, "wb") as buf:
                     content = await f.read()
+                    if len(content) > MAX_UPLOAD_SIZE:
+                        raise HTTPException(400, f"File too large: {f.filename}. Maximum size is 10 GB.")
                     buf.write(content)
+        except HTTPException:
+            shutil.rmtree(source_dir, ignore_errors=True)
+            raise
     else:
         raise HTTPException(400, "Must provide either source_path or upload files")
 
@@ -109,8 +133,28 @@ async def create_job(
 async def list_jobs(db: Session = Depends(get_db)):
     """List all jobs with summary stats."""
     jobs = db.query(Job).order_by(Job.created_at.desc()).all()
+
+    # Batch-query video counts, clip counts, and top scores to avoid N+1
+    video_counts = dict(
+        db.query(Video.job_id, func.count(Video.id)).group_by(Video.job_id).all()
+    )
+    clip_stats = {
+        row[0]: (row[1], row[2])
+        for row in db.query(
+            Clip.job_id, func.count(Clip.id), func.max(Clip.overall_score)
+        ).group_by(Clip.job_id).all()
+    }
+    stats = {
+        j.id: (
+            video_counts.get(j.id, 0),
+            clip_stats.get(j.id, (0, None))[0],
+            clip_stats.get(j.id, (0, None))[1],
+        )
+        for j in jobs
+    }
+
     return JobListResponse(
-        jobs=[_job_to_response(j, db) for j in jobs],
+        jobs=[_job_to_response(j, db, stats=stats) for j in jobs],
         total=len(jobs),
     )
 
@@ -186,6 +230,32 @@ async def start_job(job_id: str, db: Session = Depends(get_db)):
         job.error_message = f"Failed to start pipeline: {str(e)}"
         db.commit()
         db.refresh(job)
+
+    return _job_to_response(job, db)
+
+
+@router.post("/jobs/{job_id}/resume", response_model=JobResponse)
+async def resume_job(job_id: str, db: Session = Depends(get_db)):
+    """Resume a FAILED job from where it left off, skipping completed stages."""
+    job = db.query(Job).filter(Job.id == job_id).first()
+    if not job:
+        raise HTTPException(404, "Job not found")
+
+    resumable = [JobStatus.FAILED, JobStatus.CANCELLED]
+    if job.status not in resumable:
+        raise HTTPException(400, f"Job cannot be resumed from status '{job.status.value}' — only FAILED or CANCELLED jobs can be resumed")
+
+    try:
+        from app.pipeline.orchestrator import run_pipeline
+        task = run_pipeline.delay(job_id)
+        job.celery_task_id = task.id
+        job.status = JobStatus.INGESTING
+        job.error_message = None
+        job.started_at = job.started_at or datetime.now(timezone.utc)
+        db.commit()
+        db.refresh(job)
+    except Exception as e:
+        raise HTTPException(500, f"Failed to resume pipeline: {str(e)}")
 
     return _job_to_response(job, db)
 

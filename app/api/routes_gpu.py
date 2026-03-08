@@ -1,6 +1,6 @@
 """API route for system status — GPU, CPU, RAM, and active pipeline info."""
 
-import subprocess
+import asyncio
 import os
 import logging
 
@@ -10,23 +10,21 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 
-def _parse_nvidia_smi() -> dict:
-    """Run nvidia-smi and parse the output into structured data."""
+async def _parse_nvidia_smi() -> dict:
+    """Run nvidia-smi asynchronously and parse the output into structured data."""
     try:
-        result = subprocess.run(
-            [
-                "nvidia-smi",
-                "--query-gpu=name,temperature.gpu,utilization.gpu,memory.used,memory.total,power.draw,power.limit,fan.speed,persistence_mode",
-                "--format=csv,noheader,nounits",
-            ],
-            capture_output=True,
-            text=True,
-            timeout=5,
+        proc = await asyncio.create_subprocess_exec(
+            "nvidia-smi",
+            "--query-gpu=name,temperature.gpu,utilization.gpu,memory.used,memory.total,power.draw,power.limit,fan.speed,persistence_mode",
+            "--format=csv,noheader,nounits",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
         )
-        if result.returncode != 0:
+        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=5)
+        if proc.returncode != 0:
             return None
 
-        line = result.stdout.strip()
+        line = stdout.decode().strip()
         if not line:
             return None
 
@@ -163,9 +161,9 @@ def _safe_float(val: str) -> float:
 
 
 @router.get("/gpu/status")
-def system_status():
+async def system_status():
     """Return real-time system metrics: GPU, CPU, RAM, and active pipeline info."""
-    gpu_data = _parse_nvidia_smi()
+    gpu_data = await _parse_nvidia_smi()
     cpu_ram = _get_cpu_ram()
     pipeline = _get_pipeline_info()
 

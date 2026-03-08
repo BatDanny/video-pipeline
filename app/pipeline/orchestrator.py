@@ -47,6 +47,34 @@ def _update_job_telemetry(job_id: str, stage_name: str, stage_data: dict):
         db.close()
 
 
+def _mark_stage_complete(job_id: str, stage_name: str):
+    """Append a stage name to completed_stages on the Job record."""
+    SessionLocal = get_session_factory()
+    db = SessionLocal()
+    try:
+        job = db.query(Job).filter(Job.id == job_id).first()
+        if job:
+            stages = list(job.completed_stages or [])
+            if stage_name not in stages:
+                stages.append(stage_name)
+            job.completed_stages = stages
+            job.updated_at = datetime.now(timezone.utc)
+            db.commit()
+    finally:
+        db.close()
+
+
+def _get_completed_stages(job_id: str) -> set:
+    """Return the set of already-completed stage names for this job."""
+    SessionLocal = get_session_factory()
+    db = SessionLocal()
+    try:
+        job = db.query(Job).filter(Job.id == job_id).first()
+        return set(job.completed_stages or []) if job else set()
+    finally:
+        db.close()
+
+
 def _update_task_meta(task, info: dict):
     """Update Celery task metadata for WebSocket consumers and sidebar widget."""
     task.update_state(state="PROGRESS", meta=info)
@@ -78,153 +106,197 @@ def run_pipeline(self, job_id: str):
     try:
         import time
 
+        done = _get_completed_stages(job_id)
+
         # ---- Stage 1: Ingest ----
-        _update_job_status(job_id, JobStatus.INGESTING, progress_pct=0.0)
-        _update_job_telemetry(job_id, "ingest", {"status": "running", "start_time": time.time(), "hardware": "CPU (ffprobe)"})
-        _update_task_meta(self, {
-            "stage": "ingesting",
-            "message": "Validating and probing video files...",
-            "progress_pct": 0.0,
-        })
+        if "ingest" not in done:
+            _update_job_status(job_id, JobStatus.INGESTING, progress_pct=0.0)
+            _update_job_telemetry(job_id, "ingest", {"status": "running", "start_time": time.time(), "hardware": "CPU (ffprobe)"})
+            _update_task_meta(self, {
+                "stage": "ingesting",
+                "message": "Validating and probing video files...",
+                "progress_pct": 0.0,
+            })
 
-        from app.pipeline.ingest import ingest_videos
-        start_t = time.time()
-        video_count, total_bytes = ingest_videos(job_id, progress_callback=lambda info: _update_task_meta(self, info))
-        dur = time.time() - start_t
-        
-        _update_job_telemetry(job_id, "ingest", {
-            "status": "completed", 
-            "duration": dur, 
-            "hardware": "CPU (ffprobe)",
-            "file_size_bytes": total_bytes
-        })
+            from app.pipeline.ingest import ingest_videos
+            start_t = time.time()
+            video_count, total_bytes = ingest_videos(job_id, progress_callback=lambda info: _update_task_meta(self, info))
+            dur = time.time() - start_t
 
-        _update_task_meta(self, {
-            "stage": "ingesting",
-            "message": f"Ingested {video_count} video files",
-            "progress_pct": 14.0,
-        })
-        logger.info(f"Ingested {video_count} videos for job {job_id}")
+            _update_job_telemetry(job_id, "ingest", {
+                "status": "completed",
+                "duration": dur,
+                "hardware": "CPU (ffprobe)",
+                "file_size_bytes": total_bytes
+            })
+            _update_task_meta(self, {
+                "stage": "ingesting",
+                "message": f"Ingested {video_count} video files",
+                "progress_pct": 14.0,
+            })
+            _mark_stage_complete(job_id, "ingest")
+            logger.info(f"Ingested {video_count} videos for job {job_id}")
+        else:
+            logger.info(f"Skipping ingest (already complete) for job {job_id}")
+            # Recover video_count for later log messages
+            from app.models.video import Video as _Video
+            _sl = get_session_factory()()
+            try:
+                video_count = _sl.query(_Video).filter(_Video.job_id == job_id).count()
+            finally:
+                _sl.close()
 
         # ---- Stage 2: Scene Detection ----
-        _update_job_status(job_id, JobStatus.DETECTING_SCENES, progress_pct=15.0)
-        _update_job_telemetry(job_id, "detecting_scenes", {"status": "running", "start_time": time.time(), "hardware": "GPU (TransNetV2)"})
-        
-        _update_task_meta(self, {
-            "stage": "detecting_scenes",
-            "message": "Running scene detection...",
-            "progress_pct": 15.0,
-        })
+        if "detecting_scenes" not in done:
+            _update_job_status(job_id, JobStatus.DETECTING_SCENES, progress_pct=15.0)
+            _update_job_telemetry(job_id, "detecting_scenes", {"status": "running", "start_time": time.time(), "hardware": "GPU (TransNetV2)"})
+            _update_task_meta(self, {
+                "stage": "detecting_scenes",
+                "message": "Running scene detection...",
+                "progress_pct": 15.0,
+            })
 
-        from app.pipeline.scene_detect import detect_scenes
-        start_t = time.time()
-        clip_count, hw_used = detect_scenes(job_id, progress_callback=lambda info: _update_task_meta(self, info))
-        dur = time.time() - start_t
-        
-        _update_job_telemetry(job_id, "detecting_scenes", {
-            "status": "completed",
-            "duration": dur,
-            "hardware": hw_used
-        })
+            from app.pipeline.scene_detect import detect_scenes
+            start_t = time.time()
+            clip_count, hw_used = detect_scenes(job_id, progress_callback=lambda info: _update_task_meta(self, info))
+            dur = time.time() - start_t
 
-        _update_task_meta(self, {
-            "stage": "detecting_scenes",
-            "message": f"Found {clip_count} scenes across {video_count} videos",
-            "progress_pct": 24.0,
-        })
-        logger.info(f"Detected {clip_count} scenes for job {job_id}")
+            _update_job_telemetry(job_id, "detecting_scenes", {
+                "status": "completed",
+                "duration": dur,
+                "hardware": hw_used
+            })
+            _update_task_meta(self, {
+                "stage": "detecting_scenes",
+                "message": f"Found {clip_count} scenes across {video_count} videos",
+                "progress_pct": 24.0,
+            })
+            _mark_stage_complete(job_id, "detecting_scenes")
+            logger.info(f"Detected {clip_count} scenes for job {job_id}")
+        else:
+            logger.info(f"Skipping scene detection (already complete) for job {job_id}")
+            from app.models.clip import Clip as _Clip
+            _sl = get_session_factory()()
+            try:
+                clip_count = _sl.query(_Clip).filter(_Clip.job_id == job_id).count()
+            finally:
+                _sl.close()
 
         # ---- Stage 3: Analysis ----
-        # Each module loads/unloads its GPU model sequentially to manage VRAM
-
         from app.config import get_settings as _gs
         _settings = _gs()
 
         # 3a: CLIP Activity Tagging
-        _update_job_status(job_id, JobStatus.ANALYZING, progress_pct=25.0)
-        _update_job_telemetry(job_id, "clip_tagging", {"status": "running", "start_time": time.time(), "hardware": f"GPU (CLIP {_settings.clip_model})"})
-        _update_task_meta(self, {
-            "stage": "analyzing",
-            "sub_stage": "clip_tagging",
-            "message": f"Loading CLIP {_settings.clip_model} — tagging {clip_count} clips...",
-            "progress_pct": 25.0,
-        })
+        if "clip_tagging" not in done:
+            _update_job_status(job_id, JobStatus.ANALYZING, progress_pct=25.0)
+            _update_job_telemetry(job_id, "clip_tagging", {"status": "running", "start_time": time.time(), "hardware": f"GPU (CLIP {_settings.clip_model})"})
+            _update_task_meta(self, {
+                "stage": "analyzing",
+                "sub_stage": "clip_tagging",
+                "message": f"Loading CLIP {_settings.clip_model} — tagging {clip_count} clips...",
+                "progress_pct": 25.0,
+            })
 
-        from app.pipeline.analysis.clip_tagger import run_clip_tagging
-        start_t = time.time()
-        run_clip_tagging(job_id, progress_callback=lambda info: _update_task_meta(self, info))
-        dur = time.time() - start_t
-        _update_job_telemetry(job_id, "clip_tagging", {"status": "completed", "duration": dur, "hardware": f"GPU (CLIP {_settings.clip_model})"})
+            from app.pipeline.analysis.clip_tagger import run_clip_tagging
+            start_t = time.time()
+            run_clip_tagging(job_id, progress_callback=lambda info: _update_task_meta(self, info))
+            dur = time.time() - start_t
+            _update_job_telemetry(job_id, "clip_tagging", {"status": "completed", "duration": dur, "hardware": f"GPU (CLIP {_settings.clip_model})"})
+            _mark_stage_complete(job_id, "clip_tagging")
+        else:
+            logger.info(f"Skipping CLIP tagging (already complete) for job {job_id}")
+            _update_job_status(job_id, JobStatus.ANALYZING, progress_pct=40.0)
 
         # 3b: YOLOv8 Object Detection
-        _update_job_telemetry(job_id, "object_detection", {"status": "running", "start_time": time.time(), "hardware": f"GPU (YOLO {_settings.yolo_model})"})
-        _update_task_meta(self, {
-            "stage": "analyzing",
-            "sub_stage": "object_detection",
-            "message": f"Loading YOLO {_settings.yolo_model} @ {_settings.yolo_imgsz}px...",
-            "progress_pct": 40.0,
-        })
+        if "object_detection" not in done:
+            _update_job_telemetry(job_id, "object_detection", {"status": "running", "start_time": time.time(), "hardware": f"GPU (YOLO {_settings.yolo_model})"})
+            _update_task_meta(self, {
+                "stage": "analyzing",
+                "sub_stage": "object_detection",
+                "message": f"Loading YOLO {_settings.yolo_model} @ {_settings.yolo_imgsz}px...",
+                "progress_pct": 40.0,
+            })
 
-        from app.pipeline.analysis.object_detect import detect_objects_for_job
-        start_t = time.time()
-        detect_objects_for_job(job_id, progress_callback=lambda info: _update_task_meta(self, info))
-        dur = time.time() - start_t
-        _update_job_telemetry(job_id, "object_detection", {"status": "completed", "duration": dur, "hardware": f"GPU (YOLO {_settings.yolo_model})"})
+            from app.pipeline.analysis.object_detect import detect_objects_for_job
+            start_t = time.time()
+            detect_objects_for_job(job_id, progress_callback=lambda info: _update_task_meta(self, info))
+            dur = time.time() - start_t
+            _update_job_telemetry(job_id, "object_detection", {"status": "completed", "duration": dur, "hardware": f"GPU (YOLO {_settings.yolo_model})"})
+            _mark_stage_complete(job_id, "object_detection")
+        else:
+            logger.info(f"Skipping object detection (already complete) for job {job_id}")
 
         # 3c: Whisper Transcription
-        _update_job_telemetry(job_id, "transcription", {"status": "running", "start_time": time.time(), "hardware": f"GPU (Whisper {_settings.whisper_model})"})
-        _update_task_meta(self, {
-            "stage": "analyzing",
-            "sub_stage": "transcription",
-            "message": f"Loading Whisper {_settings.whisper_model}...",
-            "progress_pct": 55.0,
-        })
+        if "transcription" not in done:
+            _update_job_telemetry(job_id, "transcription", {"status": "running", "start_time": time.time(), "hardware": f"GPU (Whisper {_settings.whisper_model})"})
+            _update_task_meta(self, {
+                "stage": "analyzing",
+                "sub_stage": "transcription",
+                "message": f"Loading Whisper {_settings.whisper_model}...",
+                "progress_pct": 55.0,
+            })
 
-        from app.pipeline.analysis.transcribe import transcribe_clips_for_job
-        start_t = time.time()
-        transcribe_clips_for_job(job_id, progress_callback=lambda info: _update_task_meta(self, info))
-        dur = time.time() - start_t
-        _update_job_telemetry(job_id, "transcription", {"status": "completed", "duration": dur, "hardware": f"GPU (Whisper {_settings.whisper_model})"})
+            from app.pipeline.analysis.transcribe import transcribe_clips_for_job
+            start_t = time.time()
+            transcribe_clips_for_job(job_id, progress_callback=lambda info: _update_task_meta(self, info))
+            dur = time.time() - start_t
+            _update_job_telemetry(job_id, "transcription", {"status": "completed", "duration": dur, "hardware": f"GPU (Whisper {_settings.whisper_model})"})
+            _mark_stage_complete(job_id, "transcription")
+        else:
+            logger.info(f"Skipping transcription (already complete) for job {job_id}")
 
         # 3d: Motion Analysis (CPU-only, runs fast)
-        _update_job_telemetry(job_id, "motion", {"status": "running", "start_time": time.time(), "hardware": "CPU (OpenCV)"})
-        _update_task_meta(self, {
-            "stage": "analyzing",
-            "sub_stage": "motion",
-            "message": "Analyzing motion intensity...",
-            "progress_pct": 65.0,
-        })
+        if "motion" not in done:
+            _update_job_telemetry(job_id, "motion", {"status": "running", "start_time": time.time(), "hardware": "CPU (OpenCV)"})
+            _update_task_meta(self, {
+                "stage": "analyzing",
+                "sub_stage": "motion",
+                "message": "Analyzing motion intensity...",
+                "progress_pct": 65.0,
+            })
 
-        from app.pipeline.analysis.motion import analyze_motion_for_job
-        start_t = time.time()
-        analyze_motion_for_job(job_id, progress_callback=lambda info: _update_task_meta(self, info))
-        dur = time.time() - start_t
-        _update_job_telemetry(job_id, "motion", {"status": "completed", "duration": dur, "hardware": "CPU (OpenCV)"})
+            from app.pipeline.analysis.motion import analyze_motion_for_job
+            start_t = time.time()
+            analyze_motion_for_job(job_id, progress_callback=lambda info: _update_task_meta(self, info))
+            dur = time.time() - start_t
+            _update_job_telemetry(job_id, "motion", {"status": "completed", "duration": dur, "hardware": "CPU (OpenCV)"})
+            _mark_stage_complete(job_id, "motion")
+        else:
+            logger.info(f"Skipping motion analysis (already complete) for job {job_id}")
 
         # ---- Stage 4: Scoring ----
-        _update_job_status(job_id, JobStatus.SCORING, progress_pct=75.0)
-        _update_job_telemetry(job_id, "scoring", {"status": "running", "start_time": time.time(), "hardware": "CPU (Math/Pandas)"})
-        _update_task_meta(self, {
-            "stage": "scoring",
-            "message": "Computing clip scores...",
-            "progress_pct": 75.0,
-        })
+        if "scoring" not in done:
+            _update_job_status(job_id, JobStatus.SCORING, progress_pct=75.0)
+            _update_job_telemetry(job_id, "scoring", {"status": "running", "start_time": time.time(), "hardware": "CPU (Math/Pandas)"})
+            _update_task_meta(self, {
+                "stage": "scoring",
+                "message": "Computing clip scores...",
+                "progress_pct": 75.0,
+            })
 
-        from app.pipeline.scoring import score_clips
-        start_t = time.time()
-        score_clips(job_id)
-        dur = time.time() - start_t
-        _update_job_telemetry(job_id, "scoring", {"status": "completed", "duration": dur, "hardware": "CPU (Math/Pandas)"})
+            from app.pipeline.scoring import score_clips
+            start_t = time.time()
+            score_clips(job_id)
+            dur = time.time() - start_t
+            _update_job_telemetry(job_id, "scoring", {"status": "completed", "duration": dur, "hardware": "CPU (Math/Pandas)"})
+            _mark_stage_complete(job_id, "scoring")
+        else:
+            logger.info(f"Skipping scoring (already complete) for job {job_id}")
+            _update_job_status(job_id, JobStatus.SCORING, progress_pct=85.0)
 
         # ---- Stage 5: Generate thumbnails ----
-        _update_task_meta(self, {
-            "stage": "scoring",
-            "message": "Generating thumbnails...",
-            "progress_pct": 85.0,
-        })
+        if "thumbnails" not in done:
+            _update_task_meta(self, {
+                "stage": "scoring",
+                "message": "Generating thumbnails...",
+                "progress_pct": 85.0,
+            })
 
-        from app.export.thumbnail import generate_thumbnails
-        generate_thumbnails(job_id)
+            from app.export.thumbnail import generate_thumbnails
+            generate_thumbnails(job_id)
+            _mark_stage_complete(job_id, "thumbnails")
+        else:
+            logger.info(f"Skipping thumbnails (already complete) for job {job_id}")
 
         # ---- Stage 6 (Optional): Enhancement ----
         SessionLocal = get_session_factory()

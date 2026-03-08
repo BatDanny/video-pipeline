@@ -14,9 +14,10 @@ from app.schemas.clip import ClipResponse, ClipListResponse, ClipUpdate
 router = APIRouter()
 
 
-def _clip_to_response(clip: Clip, db: Session) -> ClipResponse:
+def _clip_to_response(clip: Clip, db: Session, video: Video = None) -> ClipResponse:
     """Convert a Clip ORM object to response schema."""
-    video = db.query(Video).filter(Video.id == clip.video_id).first()
+    if video is None:
+        video = db.query(Video).filter(Video.id == clip.video_id).first()
     return ClipResponse(
         id=clip.id,
         video_id=clip.video_id,
@@ -67,9 +68,6 @@ async def list_clips(
     if favorites_only:
         query = query.filter(Clip.is_favorite == True)  # noqa: E712
 
-    # Total before pagination
-    total = query.count()
-
     # Sorting
     if sort_by == "score":
         query = query.order_by(Clip.overall_score.desc())
@@ -78,23 +76,27 @@ async def list_clips(
     elif sort_by == "chronological":
         query = query.order_by(Clip.video_id, Clip.start_sec)
 
-    # Pagination
-    clips = query.offset(offset).limit(limit).all()
-
-    # Tag filtering (in-memory since tags are JSON)
+    # Tag filtering (in-memory since tags are JSON) — must run BEFORE pagination
     if tags:
         tag_list = [t.strip().lower() for t in tags.split(",") if t.strip()]
-        filtered = []
-        for clip in clips:
-            if clip.tags:
-                clip_tags = {t.get("tag", "").lower() for t in clip.tags}
-                if any(t in clip_tags for t in tag_list):
-                    filtered.append(clip)
-        clips = filtered
-        total = len(clips)
+        all_clips = query.all()
+        filtered = [
+            c for c in all_clips
+            if c.tags and any(t in {x.get("tag", "").lower() for x in c.tags} for t in tag_list)
+        ]
+        total = len(filtered)
+        clips = filtered[offset : offset + limit]
+    else:
+        total = query.count()
+        clips = query.offset(offset).limit(limit).all()
+
+    # Batch-load videos to avoid N+1 queries
+    video_ids = list({c.video_id for c in clips})
+    videos = db.query(Video).filter(Video.id.in_(video_ids)).all() if video_ids else []
+    videos_by_id = {v.id: v for v in videos}
 
     return ClipListResponse(
-        clips=[_clip_to_response(c, db) for c in clips],
+        clips=[_clip_to_response(c, db, video=videos_by_id.get(c.video_id)) for c in clips],
         total=total,
     )
 
@@ -145,3 +147,15 @@ async def get_clip_preview(clip_id: str, db: Session = Depends(get_db)):
     if not clip.preview_path or not os.path.isfile(clip.preview_path):
         raise HTTPException(404, "Preview not found")
     return FileResponse(clip.preview_path, media_type="video/mp4")
+
+
+@router.get("/clips/{clip_id}/video")
+async def get_clip_source_video(clip_id: str, db: Session = Depends(get_db)):
+    """Serve the original video file for a clip, used for playback via media fragments."""
+    clip = db.query(Clip).filter(Clip.id == clip_id).first()
+    if not clip:
+        raise HTTPException(404, "Clip not found")
+    video = db.query(Video).filter(Video.id == clip.video_id).first()
+    if not video or not os.path.isfile(video.filepath):
+        raise HTTPException(404, "Source video not found")
+    return FileResponse(video.filepath, media_type="video/mp4")

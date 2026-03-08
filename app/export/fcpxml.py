@@ -40,10 +40,11 @@ def _seconds_to_rational(seconds: float, fps: float = 30.0) -> str:
     return f"{ticks}/{timebase}s"
 
 
-def _get_format_id(fps: float, width: int, height: int) -> str:
-    """Generate a format identifier for FCPXML."""
-    fps_str = str(int(fps)) if fps == int(fps) else f"{fps:.2f}".replace(".", "")
-    return f"r{width}x{height}p{fps_str}"
+def _fps_code(fps: float) -> str:
+    """Return FCP-style fps code (e.g. 2997, 5994, 11988, 30)."""
+    if abs(fps - int(fps)) < 0.01:
+        return str(int(fps))
+    return f"{fps:.2f}".replace(".", "")
 
 
 class FCPXMLBuilder:
@@ -75,19 +76,23 @@ class FCPXMLBuilder:
         # --- Resources ---
         resources = etree.SubElement(root, "resources")
 
-        # Track unique source videos and create asset/format resources
+        # Track unique source videos and create asset/format resources.
+        # All resources share one sequential counter (r1, r2, ...) — no collisions.
         video_assets = {}  # video_id -> asset_id
-        format_ids = {}  # format_key -> format_id
+        format_ids = {}    # format_key -> format_id
+        _res_counter = 0
 
-        for i, cd in enumerate(clips_data):
+        def _next_rid() -> str:
+            nonlocal _res_counter
+            _res_counter += 1
+            return f"r{_res_counter}"
+
+        # First pass: collect unique formats and emit <format> resources
+        for cd in clips_data:
             video = cd.get("video")
-            if not video or video.id in video_assets:
+            if not video:
                 continue
 
-            asset_id = f"r{i + 1}"
-            video_assets[video.id] = asset_id
-
-            # Parse resolution
             width, height = 1920, 1080
             if video.resolution and "x" in video.resolution:
                 parts = video.resolution.split("x")
@@ -97,26 +102,44 @@ class FCPXMLBuilder:
                     pass
 
             fps = video.fps or 30.0
-
-            # Create format resource if needed
             fmt_key = f"{width}x{height}@{fps}"
-            if fmt_key not in format_ids:
-                fmt_id = _get_format_id(fps, width, height)
-                format_ids[fmt_key] = fmt_id
 
-                fmt_elem = etree.SubElement(resources, "format",
+            if fmt_key not in format_ids:
+                fmt_id = _next_rid()
+                format_ids[fmt_key] = fmt_id
+                fmt_name = f"FFVideoFormat{width}x{height}p{_fps_code(fps)}"
+                etree.SubElement(resources, "format",
                     id=fmt_id,
-                    name=f"{width}x{height} {fps:.2f}fps",
+                    name=fmt_name,
                     width=str(width),
                     height=str(height),
                     frameDuration=_seconds_to_rational(1.0 / fps, fps),
                 )
 
-            # Create asset resource
+        # Second pass: emit <asset> resources
+        for i, cd in enumerate(clips_data):
+            video = cd.get("video")
+            if not video or video.id in video_assets:
+                continue
+
+            asset_id = _next_rid()
+            video_assets[video.id] = asset_id
+
+            width, height = 1920, 1080
+            if video.resolution and "x" in video.resolution:
+                parts = video.resolution.split("x")
+                try:
+                    width, height = int(parts[0]), int(parts[1])
+                except ValueError:
+                    pass
+
+            fps = video.fps or 30.0
+            fmt_key = f"{width}x{height}@{fps}"
+
             duration_rational = _seconds_to_rational(video.duration_sec or 0, fps)
             asset = etree.SubElement(resources, "asset",
                 id=asset_id,
-                src=f"file://{video.filepath}",
+                name=video.filename if video.filename else f"Asset {i+1}",
                 start="0/1s",
                 duration=duration_rational,
                 hasVideo="1",
@@ -124,7 +147,7 @@ class FCPXMLBuilder:
                 format=format_ids[fmt_key],
             )
 
-            media_rep = etree.SubElement(asset, "media-rep",
+            etree.SubElement(asset, "media-rep",
                 kind="original-media",
                 src=f"file://{video.filepath}",
             )
@@ -140,7 +163,7 @@ class FCPXMLBuilder:
         total_duration = sum(cd["clip"].duration_sec for cd in clips_data if cd.get("clip"))
 
         # Determine primary format (from first clip)
-        primary_format = list(format_ids.values())[0] if format_ids else "r1920x1080p30"
+        primary_format = list(format_ids.values())[0] if format_ids else "r1"
         primary_fps = clips_data[0]["video"].fps if clips_data and clips_data[0].get("video") else 30.0
 
         sequence = etree.SubElement(project, "sequence",

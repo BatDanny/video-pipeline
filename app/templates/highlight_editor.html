@@ -34,9 +34,50 @@
                 <button class="btn btn-primary" onclick="exportFCPXML()">
                     Export FCPXML
                 </button>
+                <button class="btn btn-secondary btn-icon" onclick="showExportGuide()" title="How to use FCPXML File">
+                    ℹ️
+                </button>
                 <button class="btn btn-secondary" onclick="exportMetadata()">
                     Export Metadata
                 </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- FCPXML Instructions Modal -->
+<div class="modal-overlay" id="export-guide-modal" style="display:none">
+    <div class="modal glass-card" style="max-width: 600px;">
+        <button class="modal-close" onclick="closeExportGuide()">&times;</button>
+        <div class="modal-header">
+            <h3>How to Use FCPXML</h3>
+        </div>
+        <div class="modal-body">
+            <p>The <strong>Final Cut Pro XML (.fcpxml)</strong> file contains your cuts and sequence data. It connects
+                to your original GoPro files.</p>
+
+            <h4>🎬 Final Cut Pro (Mac Native)</h4>
+            <ol>
+                <li>Go to <strong>File > Import > XML...</strong></li>
+                <li>Select the <code>.fcpxml</code> file.</li>
+            </ol>
+
+            <h4>🎨 DaVinci Resolve (Free/Studio)</h4>
+            <ol>
+                <li>Go to the <strong>Edit Page</strong>.</li>
+                <li>Go to <strong>File > Import > Timeline...</strong></li>
+                <li>Select the <code>.fcpxml</code> file and ensure "Automatically import source clips" is checked.</li>
+            </ol>
+
+            <h4>🎞️ Adobe Premiere Pro</h4>
+            <p>Use a free tool like <a href="https://intelligentassistance.com/xtocc.html" target="_blank">XtoCC</a> or
+                import via DaVinci Resolve to convert it to a standard XML first. Then use <strong>File >
+                    Import...</strong></p>
+
+            <div class="alert alert-info mt-3"
+                style="background: rgba(0, 150, 255, 0.1); padding: 10px; border-radius: 6px;">
+                <strong>Missing Media?</strong> If clips show as offline, click "Relink" and point your software to your
+                GoPro footage folder.
             </div>
         </div>
     </div>
@@ -45,7 +86,16 @@
 {% block scripts %}
 <script>
     const JOB_ID = '{{ job_id }}', HL_ID = '{{ highlight_id }}'; let reel = null;
-    document.addEventListener('DOMContentLoaded', loadReel);
+    document.addEventListener('DOMContentLoaded', () => {
+        loadReel();
+        document.getElementById('reel-name').addEventListener('blur', async function() {
+            const name = this.value.trim() || 'Untitled';
+            if (reel && name !== reel.name) {
+                await fetch(`/api/highlights/${HL_ID}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) });
+                reel.name = name;
+            }
+        });
+    });
     async function loadReel() {
         const r = await fetch(`/api/highlights/${HL_ID}`); reel = await r.json();
         document.getElementById('reel-name').value = reel.name;
@@ -55,26 +105,28 @@
     async function renderTimeline() {
         const tl = document.getElementById('timeline'); const te = document.getElementById('timeline-empty');
         if (!reel || !reel.clip_ids || !reel.clip_ids.length) { te.style.display = 'flex'; tl.querySelectorAll('.timeline-clip').forEach(e => e.remove()); updateMeta(); return; }
-        te.style.display = 'none'; let html = ''; let totalDur = 0;
-        for (let i = 0; i < reel.clip_ids.length; i++) {
-            const cid = reel.clip_ids[i];
-            try {
-                const r = await fetch(`/api/clips/${cid}`); const c = await r.json(); totalDur += c.duration_sec;
-                const tags = (c.tags || []).slice(0, 2).map(t => t.tag).join(', ');
-                const th = c.thumbnail_path ? `/api/clips/${cid}/thumbnail` : '';
-                html += `<div class="timeline-clip" draggable="true" data-id="${cid}" data-index="${i}">
+        te.style.display = 'none';
+        const results = await Promise.all(
+            reel.clip_ids.map(cid => fetch(`/api/clips/${cid}`).then(r => r.json()).catch(() => null))
+        );
+        let html = ''; let totalDur = 0;
+        results.forEach((c, i) => {
+            if (!c) { html += `<div class="timeline-clip error"><span>Clip not found</span></div>`; return; }
+            const cid = reel.clip_ids[i]; totalDur += c.duration_sec;
+            const tags = (c.tags || []).slice(0, 2).map(t => t.tag).join(', ');
+            const th = c.thumbnail_path ? `/api/clips/${cid}/thumbnail` : '';
+            html += `<div class="timeline-clip" draggable="true" data-id="${cid}" data-index="${i}">
             <div class="tc-thumb" ${th ? `style="background-image:url('${th}')"` : ''}></div>
-            <div class="tc-info"><span class="tc-tags">${escapeHtml(tags || 'untitled')}</span><span class="tc-dur">${fmtDur(c.duration_sec)}</span><span class="tc-score">${c.effective_score.toFixed(0)}</span></div>
+            <div class="tc-info"><span class="tc-tags">${escapeHtml(tags || 'untitled')}</span><span class="tc-dur">${formatDuration(c.duration_sec)}</span><span class="tc-score">${c.effective_score.toFixed(0)}</span></div>
             <div class="tc-actions"><button class="tc-remove" onclick="removeClip(${i})" title="Remove">&times;</button></div>
         </div>`;
-            } catch (e) { html += `<div class="timeline-clip error"><span>Clip not found</span></div>`; }
-        }
+        });
         tl.querySelectorAll('.timeline-clip').forEach(e => e.remove());
         tl.insertAdjacentHTML('beforeend', html); reel.actual_duration_sec = totalDur; updateMeta(); setupDragDrop();
     }
     function updateMeta() {
         const d = reel ? reel.actual_duration_sec || 0 : 0;
-        document.getElementById('reel-duration').textContent = fmtDur(d);
+        document.getElementById('reel-duration').textContent = formatDuration(d);
         document.getElementById('reel-clip-count').textContent = reel ? reel.clip_ids.length : 0;
     }
     function setupDragDrop() {
@@ -100,14 +152,23 @@
         const ids = [...reel.clip_ids]; ids.splice(idx, 1); await saveClipOrder(ids);
     }
     async function autoFill() {
-        const r = await fetch(`/api/jobs/${JOB_ID}/highlights`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: reel.name, target_duration_sec: 120, auto_assemble: true }) });
-        if (r.ok) { const h = await r.json(); window.location.href = `/jobs/${JOB_ID}/highlights/${h.id}`; }
+        const r = await fetch(`/api/jobs/${JOB_ID}/clips?sort_by=score&limit=200`);
+        if (!r.ok) return;
+        const d = await r.json();
+        const targetDur = 120;
+        let ids = [], total = 0;
+        for (const c of d.clips) {
+            if (total + c.duration_sec > targetDur) continue;
+            ids.push(c.id); total += c.duration_sec;
+        }
+        await saveClipOrder(ids);
     }
     async function updateTransition() {
         await fetch(`/api/highlights/${HL_ID}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ transition_type: document.getElementById('transition-type').value }) });
     }
     function exportFCPXML() { window.open(`/api/highlights/${HL_ID}/export/fcpxml`); }
     function exportMetadata() { window.open(`/api/highlights/${HL_ID}/export/metadata`); }
-    function fmtDur(s) { if (s < 60) return s.toFixed(1) + 's'; return Math.floor(s / 60) + ':' + String(Math.floor(s % 60)).padStart(2, '0'); }
+    function showExportGuide() { document.getElementById('export-guide-modal').style.display = 'flex'; }
+    function closeExportGuide() { document.getElementById('export-guide-modal').style.display = 'none'; }
 </script>
 {% endblock %}

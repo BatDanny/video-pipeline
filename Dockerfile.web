@@ -1,0 +1,38 @@
+# ============================================
+# VideoPipe — Web Container (slim, no GPU)
+# ============================================
+# Runs FastAPI/uvicorn only. No AI packages, no CUDA.
+# Build: docker build -f Dockerfile.web -t videopipe-web .
+
+FROM python:3.11-slim
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONDONTWRITEBYTECODE=1
+
+# System dependencies (curl for healthcheck, ffmpeg not needed here — worker handles it)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Install only web dependencies (no torch, ultralytics, whisper, etc.)
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy application code
+COPY . .
+
+# Create data directories and setup non-root user
+RUN groupadd -g 1000 appuser && \
+    useradd -u 1000 -g appuser -s /bin/bash -m appuser && \
+    mkdir -p /app/data/uploads /app/data/outputs /app/data/models /app/data/db /app/data/logs && \
+    chown -R appuser:appuser /app/data
+
+EXPOSE 8000
+
+HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
+    CMD curl -f http://localhost:8000/ || exit 1
+
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"]
