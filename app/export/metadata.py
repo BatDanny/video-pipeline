@@ -8,6 +8,13 @@ from datetime import datetime, timezone
 logger = logging.getLogger(__name__)
 
 
+def _safe_name(value: str, default: str) -> str:
+    """Return a filesystem-safe filename stem."""
+    cleaned = "".join(ch if ch.isalnum() or ch in {"-", "_"} else "_" for ch in (value or ""))
+    cleaned = cleaned.strip("_")
+    return cleaned or default
+
+
 def write_clip_sidecar(clip, video, output_dir: str) -> str:
     """Write a JSON metadata sidecar for a single clip.
 
@@ -84,7 +91,7 @@ def write_metadata_bundle(highlight_reel, clips: list, output_dir: str) -> str:
     bundle["generated_at"] = datetime.now(timezone.utc).isoformat()
 
     os.makedirs(output_dir, exist_ok=True)
-    filename = f"{highlight_reel.name.replace(' ', '_')}_metadata.json"
+    filename = f"{_safe_name(highlight_reel.name, 'highlight_reel')}_metadata.json"
     filepath = os.path.join(output_dir, filename)
 
     with open(filepath, "w", encoding="utf-8") as f:

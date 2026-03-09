@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
+from app.api.security import require_api_token
 from app.models.database import get_db
 from app.models.job import Job
 from app.models.clip import Clip
@@ -24,6 +25,7 @@ async def create_highlight(
     job_id: str,
     req: HighlightCreate,
     db: Session = Depends(get_db),
+    _auth: None = Depends(require_api_token),
 ):
     """Create a new highlight reel, optionally auto-assembling from scored clips."""
     job = db.query(Job).filter(Job.id == job_id).first()
@@ -60,7 +62,7 @@ async def create_highlight(
 
 
 @router.get("/jobs/{job_id}/highlights", response_model=HighlightListResponse)
-async def list_highlights(job_id: str, db: Session = Depends(get_db)):
+async def list_highlights(job_id: str, db: Session = Depends(get_db), _auth: None = Depends(require_api_token)):
     """List all highlight reels for a job."""
     reels = db.query(HighlightReel).filter(HighlightReel.job_id == job_id).all()
     return HighlightListResponse(
@@ -70,7 +72,7 @@ async def list_highlights(job_id: str, db: Session = Depends(get_db)):
 
 
 @router.get("/highlights/{highlight_id}", response_model=HighlightResponse)
-async def get_highlight(highlight_id: str, db: Session = Depends(get_db)):
+async def get_highlight(highlight_id: str, db: Session = Depends(get_db), _auth: None = Depends(require_api_token)):
     """Get a single highlight reel."""
     reel = db.query(HighlightReel).filter(HighlightReel.id == highlight_id).first()
     if not reel:
@@ -83,6 +85,7 @@ async def update_highlight(
     highlight_id: str,
     update: HighlightUpdate,
     db: Session = Depends(get_db),
+    _auth: None = Depends(require_api_token),
 ):
     """Update a highlight reel — reorder clips, change transitions."""
     reel = db.query(HighlightReel).filter(HighlightReel.id == highlight_id).first()
@@ -115,6 +118,7 @@ async def export_fcpxml(
     highlight_id: str,
     media_path: str = Query(None, description="Local media folder path for FCP relink (e.g. /Volumes/SSD/MyProject/)"),
     db: Session = Depends(get_db),
+    _auth: None = Depends(require_api_token),
 ):
     """Generate and download FCPXML file for a highlight reel."""
     reel = db.query(HighlightReel).filter(HighlightReel.id == highlight_id).first()
@@ -151,7 +155,8 @@ async def export_fcpxml(
 
     # Save to output dir
     output_dir = job.output_dir or "/tmp"
-    fcpxml_path = os.path.join(output_dir, f"{reel.name.replace(' ', '_')}.fcpxml")
+    safe_reel_name = "".join(ch if ch.isalnum() or ch in {"-", "_"} else "_" for ch in reel.name).strip("_") or "highlight_reel"
+    fcpxml_path = os.path.join(output_dir, f"{safe_reel_name}.fcpxml")
     with open(fcpxml_path, "w", encoding="utf-8") as f:
         f.write(xml_content)
 
@@ -166,7 +171,7 @@ async def export_fcpxml(
 
 
 @router.get("/highlights/{highlight_id}/export/metadata")
-async def export_metadata(highlight_id: str, db: Session = Depends(get_db)):
+async def export_metadata(highlight_id: str, db: Session = Depends(get_db), _auth: None = Depends(require_api_token)):
     """Download JSON metadata bundle for a highlight reel."""
     reel = db.query(HighlightReel).filter(HighlightReel.id == highlight_id).first()
     if not reel:

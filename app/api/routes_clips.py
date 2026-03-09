@@ -6,6 +6,7 @@ from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 from typing import Optional
 
+from app.api.security import require_api_token
 from app.models.database import get_db
 from app.models.clip import Clip
 from app.models.video import Video
@@ -54,6 +55,7 @@ async def list_clips(
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
     db: Session = Depends(get_db),
+    _auth: None = Depends(require_api_token),
 ):
     """List clips for a job with filtering and sorting."""
     query = db.query(Clip).filter(Clip.job_id == job_id)
@@ -102,7 +104,7 @@ async def list_clips(
 
 
 @router.get("/clips/{clip_id}", response_model=ClipResponse)
-async def get_clip(clip_id: str, db: Session = Depends(get_db)):
+async def get_clip(clip_id: str, db: Session = Depends(get_db), _auth: None = Depends(require_api_token)):
     """Get a single clip with full metadata."""
     clip = db.query(Clip).filter(Clip.id == clip_id).first()
     if not clip:
@@ -111,7 +113,7 @@ async def get_clip(clip_id: str, db: Session = Depends(get_db)):
 
 
 @router.patch("/clips/{clip_id}", response_model=ClipResponse)
-async def update_clip(clip_id: str, update: ClipUpdate, db: Session = Depends(get_db)):
+async def update_clip(clip_id: str, update: ClipUpdate, db: Session = Depends(get_db), _auth: None = Depends(require_api_token)):
     """Update a clip's user score override or favorite status."""
     clip = db.query(Clip).filter(Clip.id == clip_id).first()
     if not clip:
@@ -128,7 +130,7 @@ async def update_clip(clip_id: str, update: ClipUpdate, db: Session = Depends(ge
 
 
 @router.get("/clips/{clip_id}/thumbnail")
-async def get_clip_thumbnail(clip_id: str, db: Session = Depends(get_db)):
+async def get_clip_thumbnail(clip_id: str, db: Session = Depends(get_db), _auth: None = Depends(require_api_token)):
     """Serve a clip's thumbnail image."""
     clip = db.query(Clip).filter(Clip.id == clip_id).first()
     if not clip:
@@ -139,7 +141,7 @@ async def get_clip_thumbnail(clip_id: str, db: Session = Depends(get_db)):
 
 
 @router.get("/clips/{clip_id}/preview")
-async def get_clip_preview(clip_id: str, db: Session = Depends(get_db)):
+async def get_clip_preview(clip_id: str, db: Session = Depends(get_db), _auth: None = Depends(require_api_token)):
     """Serve a clip's preview video."""
     clip = db.query(Clip).filter(Clip.id == clip_id).first()
     if not clip:
@@ -150,7 +152,7 @@ async def get_clip_preview(clip_id: str, db: Session = Depends(get_db)):
 
 
 @router.get("/clips/{clip_id}/video")
-async def get_clip_source_video(clip_id: str, db: Session = Depends(get_db)):
+async def get_clip_source_video(clip_id: str, db: Session = Depends(get_db), _auth: None = Depends(require_api_token)):
     """Serve the original video file for a clip, used for playback via media fragments."""
     clip = db.query(Clip).filter(Clip.id == clip_id).first()
     if not clip:

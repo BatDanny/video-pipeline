@@ -15,6 +15,7 @@ from app.models.video import Video
 from app.models.clip import Clip
 from app.schemas.job import JobCreate, JobUpdate, JobResponse, JobListResponse, JobStartRequest
 from app.config import get_settings
+from app.api.security import ensure_path_within_allowed_roots, require_api_token
 
 router = APIRouter()
 
@@ -64,6 +65,7 @@ async def create_job(
     activity_focus: str = Form(""),  # Comma-separated
     files: list[UploadFile] = File(default=[]),
     db: Session = Depends(get_db),
+    _auth: None = Depends(require_api_token),
 ):
     """Create a new pipeline job.
 
@@ -81,6 +83,7 @@ async def create_job(
     # Determine source directory
     if source_path:
         # NAS/server path reference mode — validate path exists
+        source_path = ensure_path_within_allowed_roots(source_path, settings)
         if not os.path.isdir(source_path):
             raise HTTPException(400, f"Source path does not exist or is not a directory: {source_path}")
         source_dir = source_path
@@ -97,7 +100,10 @@ async def create_job(
                     raise HTTPException(400, f"Unsupported file type: {ext}. Allowed: {', '.join(sorted(ALLOWED_VIDEO_EXTS))}")
                 if f.size and f.size > MAX_UPLOAD_SIZE:
                     raise HTTPException(400, f"File too large: {f.filename}. Maximum size is 10 GB.")
-                dest = os.path.join(source_dir, f.filename)
+                safe_name = os.path.basename(f.filename)
+                if safe_name != f.filename or not safe_name:
+                    raise HTTPException(400, f"Invalid filename: {f.filename}")
+                dest = os.path.join(source_dir, safe_name)
                 with open(dest, "wb") as buf:
                     content = await f.read()
                     if len(content) > MAX_UPLOAD_SIZE:
@@ -130,7 +136,7 @@ async def create_job(
 
 
 @router.get("/jobs", response_model=JobListResponse)
-async def list_jobs(db: Session = Depends(get_db)):
+async def list_jobs(db: Session = Depends(get_db), _auth: None = Depends(require_api_token)):
     """List all jobs with summary stats."""
     jobs = db.query(Job).order_by(Job.created_at.desc()).all()
 
@@ -160,7 +166,7 @@ async def list_jobs(db: Session = Depends(get_db)):
 
 
 @router.get("/jobs/{job_id}", response_model=JobResponse)
-async def get_job(job_id: str, db: Session = Depends(get_db)):
+async def get_job(job_id: str, db: Session = Depends(get_db), _auth: None = Depends(require_api_token)):
     """Get a single job by ID."""
     job = db.query(Job).filter(Job.id == job_id).first()
     if not job:
@@ -173,6 +179,7 @@ async def update_job(
     job_id: str,
     update: JobUpdate,
     db: Session = Depends(get_db),
+    _auth: None = Depends(require_api_token),
 ):
     """Update a job's name and/or config.
 
@@ -208,7 +215,7 @@ async def update_job(
 
 
 @router.post("/jobs/{job_id}/start", response_model=JobResponse)
-async def start_job(job_id: str, db: Session = Depends(get_db)):
+async def start_job(job_id: str, db: Session = Depends(get_db), _auth: None = Depends(require_api_token)):
     """Start pipeline execution for a job."""
     job = db.query(Job).filter(Job.id == job_id).first()
     if not job:
@@ -235,7 +242,7 @@ async def start_job(job_id: str, db: Session = Depends(get_db)):
 
 
 @router.post("/jobs/{job_id}/resume", response_model=JobResponse)
-async def resume_job(job_id: str, db: Session = Depends(get_db)):
+async def resume_job(job_id: str, db: Session = Depends(get_db), _auth: None = Depends(require_api_token)):
     """Resume a FAILED job from where it left off, skipping completed stages."""
     job = db.query(Job).filter(Job.id == job_id).first()
     if not job:
@@ -261,7 +268,7 @@ async def resume_job(job_id: str, db: Session = Depends(get_db)):
 
 
 @router.post("/jobs/{job_id}/cancel", response_model=JobResponse)
-async def cancel_job(job_id: str, db: Session = Depends(get_db)):
+async def cancel_job(job_id: str, db: Session = Depends(get_db), _auth: None = Depends(require_api_token)):
     """Cancel a running job."""
     job = db.query(Job).filter(Job.id == job_id).first()
     if not job:
@@ -292,7 +299,7 @@ async def cancel_job(job_id: str, db: Session = Depends(get_db)):
 
 
 @router.delete("/jobs/{job_id}", status_code=204)
-async def delete_job(job_id: str, db: Session = Depends(get_db)):
+async def delete_job(job_id: str, db: Session = Depends(get_db), _auth: None = Depends(require_api_token)):
     """Delete a job and all associated data."""
     job = db.query(Job).filter(Job.id == job_id).first()
     if not job:
@@ -313,7 +320,7 @@ async def delete_job(job_id: str, db: Session = Depends(get_db)):
 
 
 @router.delete("/jobs", status_code=204)
-async def delete_all_jobs(db: Session = Depends(get_db)):
+async def delete_all_jobs(db: Session = Depends(get_db), _auth: None = Depends(require_api_token)):
     """Delete all jobs and sweep all uploaded/output data."""
     jobs = db.query(Job).all()
     settings = get_settings()

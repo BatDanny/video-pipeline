@@ -4,26 +4,14 @@ import os
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, Query, HTTPException
+from fastapi import APIRouter, Query, HTTPException, Depends
+
+from app.api.security import ensure_path_within_allowed_roots, require_api_token
+from app.config import get_settings
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/browse", tags=["browse"])
-
-# Allowed base paths (security: prevent browsing outside these)
-ALLOWED_ROOTS = [
-    "/mnt/nas",
-    "/app/data/uploads",
-]
-
-
-def _is_path_allowed(path: str) -> bool:
-    """Check if path is under an allowed root directory. Blocks symlinks."""
-    if os.path.islink(path):
-        return False
-    real_path = os.path.realpath(path)
-    return any(real_path.startswith(os.path.realpath(root)) for root in ALLOWED_ROOTS)
-
 
 # Video file extensions
 VIDEO_EXTENSIONS = {".mp4", ".mov", ".m4v", ".avi", ".mkv", ".mts", ".m2ts"}
@@ -32,13 +20,16 @@ VIDEO_EXTENSIONS = {".mp4", ".mov", ".m4v", ".avi", ".mkv", ".mts", ".m2ts"}
 @router.get("")
 async def browse_directory(
     path: str = Query("/mnt/nas/gopro", description="Directory to browse"),
+    _auth: None = Depends(require_api_token),
 ):
     """Browse a directory and return its contents.
 
     Returns folders and video files, sorted with folders first.
     Only paths under allowed roots can be browsed (security).
     """
-    if not _is_path_allowed(path):
+    path = ensure_path_within_allowed_roots(path)
+
+    if os.path.islink(path):
         raise HTTPException(status_code=403, detail="Path not allowed")
 
     if not os.path.isdir(path):
@@ -102,8 +93,11 @@ async def browse_directory(
 
     # Parent path for navigation
     parent = os.path.dirname(path) if path != "/" else None
-    if parent and not _is_path_allowed(parent):
-        parent = None
+    if parent:
+        try:
+            parent = ensure_path_within_allowed_roots(parent)
+        except HTTPException:
+            parent = None
 
     return {
         "path": path,
@@ -117,8 +111,9 @@ async def browse_directory(
 @router.get("/roots")
 async def get_browse_roots():
     """Return available root directories for browsing."""
+    settings = get_settings()
     roots = []
-    for root in ALLOWED_ROOTS:
+    for root in settings.normalized_allowed_source_roots():
         if os.path.isdir(root):
             roots.append({
                 "name": os.path.basename(root) or root,

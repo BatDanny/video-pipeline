@@ -1,7 +1,11 @@
 """Application configuration via pydantic-settings."""
 
-from pydantic_settings import BaseSettings
+from functools import lru_cache
+from pathlib import Path
 from typing import Optional
+
+from pydantic import Field
+from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
@@ -17,6 +21,12 @@ class Settings(BaseSettings):
     upload_dir: str = "/app/data/uploads"
     output_dir: str = "/app/data/outputs"
     model_cache_dir: str = "/app/data/models"
+    allowed_source_roots: list[str] = Field(default_factory=lambda: ["/mnt/nas", "/app/data/uploads"])
+
+    # Security
+    api_token: Optional[str] = None
+    require_auth: bool = False
+    worker_log_path: str = "/app/data/logs/worker.log"
 
     # Scene Detection — TransNetV2 (GPU)
     scene_detect_threshold: float = 0.5  # probability threshold (0-1) for shot boundary
@@ -79,7 +89,17 @@ class Settings(BaseSettings):
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}
 
+    def normalized_allowed_source_roots(self) -> list[str]:
+        """Return normalized absolute source roots for filesystem authorization."""
+        roots: list[str] = []
+        for root in self.allowed_source_roots:
+            normalized = str(Path(root).resolve())
+            if normalized not in roots:
+                roots.append(normalized)
+        return roots
 
+
+@lru_cache(maxsize=1)
 def get_settings() -> Settings:
     """Return cached settings instance."""
     return Settings()

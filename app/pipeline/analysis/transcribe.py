@@ -9,6 +9,7 @@ import os
 import logging
 import subprocess
 import tempfile
+from pathlib import Path
 from typing import Optional
 from collections import defaultdict
 import numpy as np
@@ -201,7 +202,12 @@ def transcribe_clips_for_job(job_id: str, progress_callback=None):
             if not video or not os.path.exists(video.filepath):
                 continue
                 
-            tmp_full_audio = tempfile.mktemp(suffix=".wav", prefix=f"whisper_{video_id}_")
+            with tempfile.NamedTemporaryFile(
+                suffix=".wav",
+                prefix=f"whisper_{video_id}_",
+                delete=False,
+            ) as tmp_file:
+                tmp_full_audio = tmp_file.name
             
             try:
                 # Extract full video audio ONCE
@@ -244,7 +250,7 @@ def transcribe_clips_for_job(job_id: str, progress_callback=None):
                         })
             
             finally:
-                if tmp_full_audio and os.path.isfile(tmp_full_audio):
+                if tmp_full_audio and Path(tmp_full_audio).is_file():
                     os.unlink(tmp_full_audio)
 
         logger.info(f"Whisper transcription complete for job {job_id}")

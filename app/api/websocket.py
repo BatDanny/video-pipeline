@@ -4,6 +4,9 @@ import json
 import asyncio
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
+from app.api.security import require_websocket_token
+from app.config import get_settings
+
 router = APIRouter()
 
 
@@ -63,6 +66,9 @@ async def job_progress_ws(websocket: WebSocket, job_id: str):
         "message": "Tagging clip 23/50..."
     }
     """
+    await require_websocket_token(websocket)
+    if websocket.client_state.name != "CONNECTING":
+        return
     await websocket.accept()
     import anyio
 
@@ -107,12 +113,22 @@ async def job_progress_ws(websocket: WebSocket, job_id: str):
 @router.websocket("/ws/logs/worker")
 async def worker_logs_ws(websocket: WebSocket):
     """Real-time streaming of Celery worker container logs via docker."""
+    await require_websocket_token(websocket)
+    if websocket.client_state.name != "CONNECTING":
+        return
     await websocket.accept()
     process = None
     try:
+        settings = get_settings()
+        log_path = settings.worker_log_path
+
+        if not log_path.startswith("/app/data/logs/"):
+            await websocket.send_text("[Log Stream Error] Worker log path is outside allowed log directory")
+            return
+
         # Start tail process on the shared log file
         process = await asyncio.create_subprocess_exec(
-            "tail", "-n", "100", "-f", "/app/data/logs/worker.log",
+            "tail", "-n", "100", "-f", log_path,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT
         )
@@ -159,4 +175,3 @@ async def worker_logs_ws(websocket: WebSocket):
                 process.kill()
             except Exception:
                 pass
-
