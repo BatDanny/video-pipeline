@@ -139,6 +139,28 @@ def seconds_to_rational(seconds: float, fps: float) -> str:
     return f"{ticks}/{timebase}s"
 
 
+def parse_timecode_to_rational(tc_str: str, fps: float) -> str:
+    """Convert a timecode string HH:MM:SS:FF to a FCPXML rational time string."""
+    if not tc_str:
+        return "0/1s"
+    try:
+        parts = tc_str.strip().split(":")
+        if len(parts) >= 4:
+            hh, mm, ss, ff = map(int, parts[:4])
+            total_seconds = hh * 3600 + mm * 60 + ss
+            
+            timebase = get_timebase(fps)
+            ticks_per_frame = get_ticks_per_frame(fps)
+            exact_fps = get_exact_fps(fps)
+            
+            total_frames = int(round(total_seconds * exact_fps)) + ff
+            ticks = total_frames * ticks_per_frame
+            return f"{ticks}/{timebase}s"
+    except Exception as e:
+        logger.warning(f"Failed to parse timecode '{tc_str}': {e}")
+    return "0/1s"
+
+
 class FCPXMLBuilder:
     """Build FCPXML 1.11 documents for Final Cut Pro and DaVinci Resolve."""
 
@@ -259,18 +281,29 @@ class FCPXMLBuilder:
             vid_fps_key = round(vid_fps, 3)
             asset_format_id = source_format_ids.get(vid_fps_key, sequence_format_id)
 
+            # Asset start time defaults to 0s, but use actual timecode offset if present
+            # so FCP doesn't error out during relinking with "no shared media range".
+            asset_start = "0/1s"
+            if getattr(video, "timecode", None):
+                asset_start = parse_timecode_to_rational(video.timecode, vid_fps)
+
+            # Audio channels
+            audio_ch = "2"
+            if getattr(video, "audio_channels", None):
+                audio_ch = str(video.audio_channels)
+
             # Asset duration in sequence timebase (FCP evaluates all timeline values
             # relative to the sequence; source format fps is used only for relink validation)
             duration_rational = seconds_to_rational(video.duration_sec or 0, sequence_fps)
             asset = etree.SubElement(resources, "asset",
                 id=asset_id,
                 name=video.filename if video.filename else f"Asset {i+1}",
-                start="0/1s",
+                start=asset_start,
                 duration=duration_rational,
                 hasVideo="1",
                 hasAudio="1",
                 audioSources="1",
-                audioChannels="2",
+                audioChannels=audio_ch,
                 format=asset_format_id,
             )
 
@@ -356,7 +389,19 @@ class FCPXMLBuilder:
             # FCPXML spec: time values on spine elements use the parent sequence's time base.
             # The asset's `format` attribute (source fps) is used only for relink validation.
             clip_duration_frames = int(round(clip.duration_sec * sequence_exact_fps))
-            start_frames = int(round(clip.start_sec * sequence_exact_fps))
+            
+            # The start of the clip IN THE ASSET'S MEDIA is its overall start_sec PLUS the timecode offset (if any)
+            tc_offset_sec = 0.0
+            if getattr(video, "timecode", None):
+                try:
+                    parts = video.timecode.strip().split(":")
+                    if len(parts) >= 4:
+                        hh, mm, ss, ff = map(int, parts[:4])
+                        tc_offset_sec = hh * 3600 + mm * 60 + ss + (ff / vid_fps)
+                except Exception:
+                    pass
+            
+            start_frames = int(round((clip.start_sec + tc_offset_sec) * sequence_exact_fps))
 
             duration_ticks = clip_duration_frames * sequence_ticks_per_frame
             start_ticks = start_frames * sequence_ticks_per_frame

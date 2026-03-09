@@ -2,7 +2,7 @@
 
 import uuid
 from datetime import datetime, timezone
-from sqlalchemy import Column, String, Float, BigInteger, DateTime, JSON, ForeignKey
+from sqlalchemy import Column, String, Float, BigInteger, DateTime, JSON, ForeignKey, Integer
 from sqlalchemy.orm import relationship
 from app.models.database import Base
 
@@ -18,6 +18,8 @@ class Video(Base):
     resolution = Column(String(32), nullable=True)  # e.g. "5312x2988"
     fps = Column(Float, nullable=True)
     codec = Column(String(32), nullable=True)  # e.g. "hevc"
+    timecode = Column(String(32), nullable=True) # e.g. "09:57:51:11"
+    audio_channels = Column(Integer, nullable=True) # e.g. 2 for stereo, 4 for ambisonic
     file_size_bytes = Column(BigInteger, nullable=True)
     gopro_metadata = Column(JSON, nullable=True)  # Parsed GoPro telemetry
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))

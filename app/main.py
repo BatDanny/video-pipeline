@@ -56,7 +56,7 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
-    application.add_middleware(TrustedHostMiddleware, allowed_hosts=["localhost", "127.0.0.1", "testserver"])
+    application.add_middleware(TrustedHostMiddleware, allowed_hosts=["localhost", "127.0.0.1", "testserver", "*"])
 
     # Mount static files
     static_dir = os.path.join(os.path.dirname(__file__), "static")

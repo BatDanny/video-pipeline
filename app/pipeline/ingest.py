@@ -45,6 +45,8 @@ def _extract_video_metadata(probe_data: dict) -> dict:
         "resolution": None,
         "fps": None,
         "codec": None,
+        "timecode": None,
+        "audio_channels": None,
         "file_size_bytes": None,
     }
 
@@ -52,6 +54,11 @@ def _extract_video_metadata(probe_data: dict) -> dict:
     fmt = probe_data.get("format", {})
     info["duration_sec"] = float(fmt.get("duration", 0)) or None
     info["file_size_bytes"] = int(fmt.get("size", 0)) or None
+
+    # Try format tags for timecode first
+    fmt_tags = fmt.get("tags", {})
+    if "timecode" in fmt_tags:
+        info["timecode"] = fmt_tags["timecode"]
 
     # From video stream
     for stream in probe_data.get("streams", []):
@@ -73,7 +80,21 @@ def _extract_video_metadata(probe_data: dict) -> dict:
                     info["fps"] = float(r_frame_rate)
                 except ValueError:
                     pass
-            break
+            
+            # Fallback timecode check in video stream
+            if not info["timecode"]:
+                v_tags = stream.get("tags", {})
+                if "timecode" in v_tags:
+                    info["timecode"] = v_tags["timecode"]
+        
+        elif stream.get("codec_type") == "audio" and info["audio_channels"] is None:
+            info["audio_channels"] = stream.get("channels")
+            
+        elif stream.get("codec_type") == "data" and not info["timecode"]:
+            # Fallback timecode check in data streaming (e.g. GoPro tmcd)
+            d_tags = stream.get("tags", {})
+            if "timecode" in d_tags:
+                info["timecode"] = d_tags["timecode"]
 
     return info
 
@@ -228,6 +249,8 @@ def ingest_videos(job_id: str, progress_callback=None) -> int:
                 resolution=metadata["resolution"],
                 fps=metadata["fps"],
                 codec=metadata["codec"],
+                timecode=metadata.get("timecode"),
+                audio_channels=metadata.get("audio_channels"),
                 file_size_bytes=metadata["file_size_bytes"],
                 gopro_metadata=gopro_meta,
             )
