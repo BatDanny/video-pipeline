@@ -259,8 +259,9 @@ class FCPXMLBuilder:
             vid_fps_key = round(vid_fps, 3)
             asset_format_id = source_format_ids.get(vid_fps_key, sequence_format_id)
 
-            # Asset duration in the source media's own timebase
-            duration_rational = seconds_to_rational(video.duration_sec or 0, vid_fps)
+            # Asset duration in sequence timebase (FCP evaluates all timeline values
+            # relative to the sequence; source format fps is used only for relink validation)
+            duration_rational = seconds_to_rational(video.duration_sec or 0, sequence_fps)
             asset = etree.SubElement(resources, "asset",
                 id=asset_id,
                 name=video.filename if video.filename else f"Asset {i+1}",
@@ -351,24 +352,19 @@ class FCPXMLBuilder:
                         duration=trans_dur,
                     )
 
-            # Calculate timecodes using each fps's own timebase.
-            # start = source in-point → source fps timebase (must align to source frames)
-            # duration = timeline duration → sequence fps timebase
-            vid_fps = float(video.fps) if video.fps else source_fps
-            src_exact_fps = get_exact_fps(vid_fps)
-            src_timebase = get_timebase(vid_fps)
-            src_ticks_per_frame = get_ticks_per_frame(vid_fps)
-
-            start_frames_src = int(round(clip.start_sec * src_exact_fps))
-            start_ticks = start_frames_src * src_ticks_per_frame
-
+            # All asset-clip time values use the SEQUENCE fps timebase.
+            # FCPXML spec: time values on spine elements use the parent sequence's time base.
+            # The asset's `format` attribute (source fps) is used only for relink validation.
             clip_duration_frames = int(round(clip.duration_sec * sequence_exact_fps))
+            start_frames = int(round(clip.start_sec * sequence_exact_fps))
+
             duration_ticks = clip_duration_frames * sequence_ticks_per_frame
+            start_ticks = start_frames * sequence_ticks_per_frame
 
             etree.SubElement(spine, "asset-clip",
                 ref=asset_id,
                 name=clip_name,
-                start=f"{start_ticks}/{src_timebase}s",
+                start=f"{start_ticks}/{sequence_timebase}s",
                 duration=f"{duration_ticks}/{sequence_timebase}s",
                 tcFormat="NDF",
             )

@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE fcpxml>
+<fcpxml version="1.11">
+  <resources>
+    <format id="r1" width="3840" height="2160" frameDuration="1001/60000s" colorSpace="1-1-1 (Rec. 709)" name="FFVideoFormat4K5994"/>
+    <asset id="r2" name="GX010336.MP4" start="0/1s" duration="17922905/60000s" hasVideo="1" hasAudio="1" audioSources="1" audioChannels="2" format="r1">
+      <media-rep kind="original-media" src="file:///mnt/nas/gopro/Vail%202026/GX010336.MP4"/>
+    </asset>
+    <asset id="r3" name="GX010342.MP4" start="0/1s" duration="6538532/60000s" hasVideo="1" hasAudio="1" audioSources="1" audioChannels="2" format="r1">
+      <media-rep kind="original-media" src="file:///mnt/nas/gopro/Vail%202026/GX010342.MP4"/>
+    </asset>
+    <asset id="r4" name="GX010344.MP4" start="0/1s" duration="15870855/60000s" hasVideo="1" hasAudio="1" audioSources="1" audioChannels="2" format="r1">
+      <media-rep kind="original-media" src="file:///mnt/nas/gopro/Vail%202026/GX010344.MP4"/>
+    </asset>
+    <asset id="r5" name="GX010337.MP4" start="0/1s" duration="11839828/60000s" hasVideo="1" hasAudio="1" audioSources="1" audioChannels="2" format="r1">
+      <media-rep kind="original-media" src="file:///mnt/nas/gopro/Vail%202026/GX010337.MP4"/>
+    </asset>
+  </resources>
+  <library>
+    <event name="AI Highlights - Vail 2026">
+      <project name="Highlight Reel38348pm">
+        <sequence duration="40559519/60000s" format="r1" tcStart="0/1s" tcFormat="NDF">
+          <spine>
+            <asset-clip ref="r2" name="Clip 01 - snowboarding, skiing, wipeout (score: 59)" start="0/60000s" duration="660660/60000s" tcFormat="NDF"/>
+            <asset-clip ref="r2" name="Clip 02 - skiing, snowboarding, wipeout (score: 54)" start="660660/60000s" duration="17262245/60000s" tcFormat="NDF"/>
+            <asset-clip ref="r3" name="Clip 03 - skiing, snowboarding, wipeout (score: 49)" start="0/60000s" duration="6538532/60000s" tcFormat="NDF"/>
+            <asset-clip ref="r4" name="Clip 04 - driving, scenic landscape, hiking (score: 45)" start="3325322/60000s" duration="4258254/60000s" tcFormat="NDF"/>
+            <asset-clip ref="r5" name="Clip 05 - skiing, snowboarding, wipeout (score: 56)" start="0/60000s" duration="11838827/60000s" tcFormat="NDF"/>
+          </spine>
+        </sequence>
+      </project>
+    </event>
+  </library>
+</fcpxml>
