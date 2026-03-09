@@ -44,3 +44,4 @@ alembic/versions/*.pyc
 
 # Logs
 *.log
+node_modules

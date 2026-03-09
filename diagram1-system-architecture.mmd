@@ -1,0 +1,146 @@
+graph TB
+    subgraph "Docker Infrastructure"
+        subgraph "web [FastAPI + uvicorn:8000]"
+            WEB[FastAPI App<br/>--reload enabled<br/>2 workers]
+            ROUTES[API Routes]
+            TEMPLATES[Jinja2 Templates]
+            STATIC[Static Files]
+        end
+
+        subgraph "worker [Celery GPU Worker]"
+            WORKER[Celery Worker<br/>concurrency=2<br/>NO auto-reload]
+            GPU[NVIDIA GPU<br/>CUDA Toolkit]
+        end
+
+        subgraph "redis [Message Broker]"
+            REDIS[(Redis 7<br/>Password Auth)]
+        end
+    end
+
+    subgraph "Shared Docker Volumes"
+        UPLOADS[uploads]
+        OUTPUTS[outputs]
+        MODELS[models]
+        DB[(SQLite DB)]
+        NAS[NAS mount]
+    end
+
+    subgraph "FastAPI Application Structure"
+        subgraph "app/api/"
+            R_JOBS[routes_jobs.py]
+            R_CLIPS[routes_clips.py]
+            R_HIGHLIGHTS[routes_highlights.py]
+            R_CONFIG[routes_config.py]
+            R_BROWSE[routes_browse.py]
+            R_GPU[routes_gpu.py]
+            WS[websocket.py]
+        end
+
+        subgraph "app/pipeline/"
+            ORCH[orchestrator.py]
+
+            subgraph "Pipeline Stages"
+                INGEST[ingest.py]
+                SCENE[scene_detect.py]
+
+                subgraph "Analysis"
+                    CLIP_TAG[clip_tagger.py]
+                    YOLO[object_detect.py]
+                    WHISPER[transcribe.py]
+                    MOTION[motion.py]
+                end
+
+                SCORE[scoring.py]
+            end
+        end
+
+        subgraph "app/export/"
+            FCPXML[fcpxml.py]
+            THUMB[thumbnail.py]
+            META[metadata.py]
+        end
+
+        subgraph "app/models/"
+            M_JOB[job.py]
+            M_VIDEO[video.py]
+            M_CLIP[clip.py]
+            M_HIGHLIGHT[highlight.py]
+            M_DB[database.py]
+        end
+    end
+
+    subgraph "Frontend Files"
+        DASH[dashboard.html]
+        UPLOAD[upload.html]
+        JOB_DET[job_detail.html]
+        CLIP_BR[clip_browser.html]
+        HL_ED[highlight_editor.html]
+        APPJS[app.js]
+    end
+
+    %% Container connections
+    WEB -->|submits tasks| REDIS
+    WORKER -->|consumes tasks| REDIS
+    WEB --> DB
+    WORKER --> DB
+    WEB --> UPLOADS
+    WEB --> OUTPUTS
+    WORKER --> UPLOADS
+    WORKER --> OUTPUTS
+    WORKER --> MODELS
+    WORKER --> NAS
+    WEB --> NAS
+    WORKER -.uses.-> GPU
+
+    %% Application flow
+    ROUTES --> R_JOBS
+    ROUTES --> R_CLIPS
+    ROUTES --> R_HIGHLIGHTS
+    ROUTES --> R_CONFIG
+    ROUTES --> R_BROWSE
+    ROUTES --> R_GPU
+    ROUTES --> WS
+
+    R_JOBS -->|creates| M_JOB
+    R_JOBS -->|triggers| ORCH
+
+    ORCH -->|Stage 1| INGEST
+    ORCH -->|Stage 2| SCENE
+    ORCH -->|Stage 3a| CLIP_TAG
+    ORCH -->|Stage 3b| YOLO
+    ORCH -->|Stage 3c| WHISPER
+    ORCH -->|Stage 3d| MOTION
+    ORCH -->|Stage 4| SCORE
+    ORCH -->|Stage 5| THUMB
+
+    INGEST --> M_VIDEO
+    SCENE --> M_CLIP
+    CLIP_TAG --> M_CLIP
+    YOLO --> M_CLIP
+    WHISPER --> M_CLIP
+    MOTION --> M_CLIP
+    SCORE --> M_CLIP
+
+    R_HIGHLIGHTS -->|builds| M_HIGHLIGHT
+    R_HIGHLIGHTS -->|exports| FCPXML
+    R_HIGHLIGHTS -->|exports| META
+
+    WEB --> TEMPLATES
+    TEMPLATES --> DASH
+    TEMPLATES --> UPLOAD
+    TEMPLATES --> JOB_DET
+    TEMPLATES --> CLIP_BR
+    TEMPLATES --> HL_ED
+
+    TEMPLATES --> APPJS
+
+    %% Styling
+    classDef gpu fill:#9f6,stroke:#363,stroke-width:3px
+    classDef hot fill:#f96,stroke:#c33,stroke-width:2px
+    classDef cold fill:#69f,stroke:#36c,stroke-width:2px
+    classDef storage fill:#fc6,stroke:#c93,stroke-width:2px
+
+    class GPU,SCENE,CLIP_TAG,YOLO,WHISPER gpu
+    class WEB hot
+    class WORKER,REDIS cold
+    class UPLOADS,OUTPUTS,MODELS,DB,NAS storage

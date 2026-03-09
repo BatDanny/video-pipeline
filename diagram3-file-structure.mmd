@@ -1,0 +1,93 @@
+graph TB
+    subgraph "Project Root"
+        DC[docker-compose.yml]
+        DW[Dockerfile.web]
+        DK[Dockerfile.worker]
+        ENV[.env]
+        CLAUDE[CLAUDE.md]
+    end
+
+    subgraph "app/"
+        MAIN[main.py]
+        CONFIG[config.py]
+
+        subgraph "app/api/"
+            API1[routes_jobs.py]
+            API2[routes_clips.py]
+            API3[routes_highlights.py]
+            API4[routes_config.py]
+            API5[routes_browse.py]
+            API6[routes_gpu.py]
+            API7[websocket.py]
+        end
+
+        subgraph "app/pipeline/"
+            P1[orchestrator.py]
+            P2[ingest.py]
+            P3[scene_detect.py]
+            P4[scoring.py]
+            P5[highlight_builder.py]
+
+            subgraph "app/pipeline/analysis/"
+                A1[clip_tagger.py]
+                A2[object_detect.py]
+                A3[transcribe.py]
+                A4[motion.py]
+            end
+
+            subgraph "app/pipeline/enhancement/"
+                E1[STUBS ONLY]
+            end
+        end
+
+        subgraph "app/export/"
+            X1[fcpxml.py]
+            X2[thumbnail.py]
+            X3[metadata.py]
+        end
+
+        subgraph "app/models/"
+            MOD1[database.py]
+            MOD2[job.py]
+            MOD3[video.py]
+            MOD4[clip.py]
+            MOD5[highlight.py]
+        end
+
+        subgraph "app/templates/"
+            T1[dashboard.html]
+            T2[upload.html]
+            T3[job_detail.html]
+            T4[clip_browser.html]
+            T5[highlight_editor.html]
+        end
+
+        subgraph "app/static/js/"
+            JS1[app.js]
+        end
+
+        WORKERS[workers/celery_app.py]
+    end
+
+    subgraph "data/"
+        V1[uploads/]
+        V2[outputs/]
+        V3[models/]
+        V4[db/pipeline.db]
+        V5[logs/worker.log]
+    end
+
+    MAIN --> API1
+    API1 --> P1
+    P1 --> P2
+    P1 --> P3
+    P1 --> P4
+    P3 --> A1
+    P3 --> A2
+    P3 --> A3
+    P3 --> A4
+
+    classDef gpu fill:#9f6,stroke:#363,stroke-width:2px
+    classDef stub fill:#f66,stroke:#c33,stroke-width:2px
+    class A1,A2,A3,P3 gpu
+    class E1 stub

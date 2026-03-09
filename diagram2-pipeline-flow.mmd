@@ -1,0 +1,68 @@
+sequenceDiagram
+    participant User
+    participant FastAPI as web (FastAPI)
+    participant Redis
+    participant Celery as worker (Celery)
+    participant GPU
+    participant DB as SQLite DB
+
+    User->>FastAPI: POST /api/jobs (upload files)
+    FastAPI->>DB: Create Job record
+    FastAPI->>Redis: Submit run_pipeline task
+    FastAPI-->>User: Return job_id
+
+    Redis->>Celery: Dequeue task
+
+    Note over Celery,DB: Stage 1: Ingest (CPU)
+    Celery->>DB: Set status=INGESTING
+    Celery->>Celery: ffprobe validation
+    Celery->>DB: Create Video records
+    Celery->>DB: Mark stage complete
+
+    Note over Celery,GPU: Stage 2: Scene Detection (GPU)
+    Celery->>DB: Set status=DETECTING_SCENES
+    Celery->>GPU: TransNetV2 inference
+    GPU-->>Celery: Scene boundaries
+    Celery->>DB: Create Clip records
+    Celery->>DB: Mark stage complete
+
+    Note over Celery,GPU: Stage 3a: CLIP Tagging (GPU)
+    Celery->>DB: Set status=ANALYZING
+    Celery->>GPU: CLIP ViT-B/32 inference
+    GPU-->>Celery: Activity tags + scores
+    Celery->>DB: Update Clip.tags
+
+    Note over Celery,GPU: Stage 3b: Object Detection (GPU)
+    Celery->>GPU: YOLOv8 inference
+    GPU-->>Celery: Object detections
+    Celery->>DB: Update Clip.detections
+
+    Note over Celery,GPU: Stage 3c: Transcription (GPU)
+    Celery->>GPU: Whisper inference
+    GPU-->>Celery: Transcript segments
+    Celery->>DB: Update Clip.transcript
+
+    Note over Celery,DB: Stage 3d: Motion Analysis (CPU)
+    Celery->>Celery: OpenCV optical flow
+    Celery->>DB: Update Clip.motion_score
+
+    Note over Celery,DB: Stage 4: Scoring (CPU)
+    Celery->>DB: Set status=SCORING
+    Celery->>Celery: Weighted composite score
+    Celery->>DB: Update Clip.score
+
+    Note over Celery,DB: Stage 5: Thumbnails (CPU)
+    Celery->>Celery: FFmpeg extract frames
+    Celery->>DB: Update Clip.thumbnail_path
+
+    Celery->>DB: Set status=COMPLETE
+    Celery->>Redis: Update progress meta
+
+    User->>FastAPI: GET /api/jobs/{job_id}
+    FastAPI->>DB: Query Job + Clips
+    FastAPI-->>User: Return results
+
+    User->>FastAPI: POST /api/highlights (build reel)
+    FastAPI->>DB: Create Highlight record
+    FastAPI->>FastAPI: Generate FCPXML
+    FastAPI-->>User: Download FCPXML
