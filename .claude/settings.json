@@ -4,7 +4,8 @@
       "Bash(ls -la /home/dannydebian/dev/video-pipeline/*.md)",
       "Bash(docker compose logs --tail=5 web)",
       "Bash(docker compose logs --tail=3 web)",
-      "Bash(git add app/api/routes_highlights.py app/export/fcpxml.py app/pipeline/scene_detect.py app/templates/highlight_editor.html test_artifacts/test_A_v111_named5994.fcpxml test_artifacts/test_B_v19_noname5994.fcpxml test_artifacts/test_C_v19_2997.fcpxml)"
+      "Bash(git add app/api/routes_highlights.py app/export/fcpxml.py app/pipeline/scene_detect.py app/templates/highlight_editor.html test_artifacts/test_A_v111_named5994.fcpxml test_artifacts/test_B_v19_noname5994.fcpxml test_artifacts/test_C_v19_2997.fcpxml)",
+      "Bash(python3 -c \":*)"
     ]
   }
 }
