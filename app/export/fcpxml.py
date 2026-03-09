@@ -101,6 +101,8 @@ def get_timebase(fps: float) -> int:
         return 30000
     elif abs(fps - 59.94) < 0.01:
         return 60000
+    elif abs(fps - 119.88) < 0.05:
+        return 120000
     else:
         return int(round(fps))
 
@@ -108,6 +110,8 @@ def get_timebase(fps: float) -> int:
 def get_ticks_per_frame(fps: float) -> int:
     """Return ticks per frame (1001 for NTSC drop-frame rates, 1 otherwise)."""
     if abs(fps - 23.976) < 0.01 or abs(fps - 29.97) < 0.01 or abs(fps - 59.94) < 0.01:
+        return 1001
+    elif abs(fps - 119.88) < 0.05:
         return 1001
     return 1
 
@@ -120,6 +124,8 @@ def get_exact_fps(fps: float) -> float:
         return 30000 / 1001
     elif abs(fps - 59.94) < 0.01:
         return 60000 / 1001
+    elif abs(fps - 119.88) < 0.05:
+        return 120000 / 1001
     return fps
 
 
@@ -190,7 +196,7 @@ class FCPXMLBuilder:
         sequence_ticks_per_frame = get_ticks_per_frame(sequence_fps)
         sequence_exact_fps = get_exact_fps(sequence_fps)
 
-        # CRITICAL: sequence format goes FIRST in <resources> and all assets reference it.
+        # CRITICAL: sequence format goes FIRST in <resources>.
         # FCP rejects a sequence whose format is not declared before assets or is unused.
         sequence_format_id = next_rid()
         sequence_format_name = get_sequence_format_name(width, height, sequence_fps)
@@ -205,7 +211,42 @@ class FCPXMLBuilder:
             fmt_attribs["name"] = sequence_format_name
         etree.SubElement(resources, "format", **fmt_attribs)
 
-        # Emit <asset> resources — all referencing the sequence format
+        # Pre-scan: create a separate <format> for each source fps that differs from
+        # the sequence fps. FCP validates asset format fps against the actual media file
+        # on relink — mismatch causes "frame rates don't match" error.
+        source_format_ids = {}  # fps_key -> format_id
+        for cd in clips_data:
+            video = cd.get("video")
+            if not video:
+                continue
+            vid_fps = float(video.fps) if video.fps else source_fps
+            vid_fps_key = round(vid_fps, 3)
+            if vid_fps_key in source_format_ids:
+                continue
+            if abs(vid_fps - sequence_fps) < 0.01:
+                # Source fps matches sequence fps — reuse sequence format
+                source_format_ids[vid_fps_key] = sequence_format_id
+            else:
+                # Source fps differs (e.g. 119.88fps GoPro) — create a dedicated format
+                src_fmt_id = next_rid()
+                source_format_ids[vid_fps_key] = src_fmt_id
+                # Resolve per-video resolution (fall back to sequence resolution)
+                src_w, src_h = width, height
+                if video.resolution and "x" in video.resolution:
+                    try:
+                        src_w, src_h = (int(p) for p in video.resolution.split("x"))
+                    except ValueError:
+                        pass
+                etree.SubElement(resources, "format",
+                    id=src_fmt_id,
+                    width=str(src_w),
+                    height=str(src_h),
+                    frameDuration=seconds_to_rational(1.0 / vid_fps, vid_fps),
+                    colorSpace="1-1-1 (Rec. 709)",
+                )
+                logger.info(f"Created source format {src_fmt_id} for {vid_fps}fps media")
+
+        # Emit <asset> resources — each referencing its own source fps format
         for i, cd in enumerate(clips_data):
             video = cd.get("video")
             if not video or video.id in video_assets:
@@ -214,7 +255,12 @@ class FCPXMLBuilder:
             asset_id = next_rid()
             video_assets[video.id] = asset_id
 
-            duration_rational = seconds_to_rational(video.duration_sec or 0, sequence_fps)
+            vid_fps = float(video.fps) if video.fps else source_fps
+            vid_fps_key = round(vid_fps, 3)
+            asset_format_id = source_format_ids.get(vid_fps_key, sequence_format_id)
+
+            # Asset duration in the source media's own timebase
+            duration_rational = seconds_to_rational(video.duration_sec or 0, vid_fps)
             asset = etree.SubElement(resources, "asset",
                 id=asset_id,
                 name=video.filename if video.filename else f"Asset {i+1}",
@@ -224,7 +270,7 @@ class FCPXMLBuilder:
                 hasAudio="1",
                 audioSources="1",
                 audioChannels="2",
-                format=sequence_format_id,
+                format=asset_format_id,
             )
 
             # Build file:// URL — remap to client path if provided
@@ -305,17 +351,24 @@ class FCPXMLBuilder:
                         duration=trans_dur,
                     )
 
-            # Calculate in FRAMES first for alignment, then convert to ticks
-            clip_duration_frames = int(round(clip.duration_sec * sequence_exact_fps))
-            start_frames = int(round(clip.start_sec * sequence_exact_fps))
+            # Calculate timecodes using each fps's own timebase.
+            # start = source in-point → source fps timebase (must align to source frames)
+            # duration = timeline duration → sequence fps timebase
+            vid_fps = float(video.fps) if video.fps else source_fps
+            src_exact_fps = get_exact_fps(vid_fps)
+            src_timebase = get_timebase(vid_fps)
+            src_ticks_per_frame = get_ticks_per_frame(vid_fps)
 
+            start_frames_src = int(round(clip.start_sec * src_exact_fps))
+            start_ticks = start_frames_src * src_ticks_per_frame
+
+            clip_duration_frames = int(round(clip.duration_sec * sequence_exact_fps))
             duration_ticks = clip_duration_frames * sequence_ticks_per_frame
-            start_ticks = start_frames * sequence_ticks_per_frame
 
             etree.SubElement(spine, "asset-clip",
                 ref=asset_id,
                 name=clip_name,
-                start=f"{start_ticks}/{sequence_timebase}s",
+                start=f"{start_ticks}/{src_timebase}s",
                 duration=f"{duration_ticks}/{sequence_timebase}s",
                 tcFormat="NDF",
             )
