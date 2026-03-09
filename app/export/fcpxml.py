@@ -1,6 +1,9 @@
 """FCPXML 1.11 builder - generates Final Cut Pro / DaVinci Resolve compatible timelines."""
 
 import logging
+import os
+from urllib.parse import quote as url_quote
+
 from lxml import etree
 
 logger = logging.getLogger(__name__)
@@ -139,11 +142,13 @@ class FCPXMLBuilder:
         job_name: str = "AI Highlights",
         transition_type: str = "cut",
         transition_duration_sec: float = 0.5,
+        client_base_path: str = None,
     ):
         self.reel_name = reel_name
         self.job_name = job_name
         self.transition_type = transition_type
         self.transition_duration_sec = transition_duration_sec
+        self.client_base_path = client_base_path.strip().strip("'\"") if client_base_path else None
 
     def build(self, clips_data: list[dict]) -> str:
         """Build the FCPXML document.
@@ -158,7 +163,7 @@ class FCPXMLBuilder:
         resources = etree.SubElement(root, "resources")
 
         video_assets = {}  # video_id -> asset_id
-        _res_counter = 0
+        _res_counter = 1  # FCPXML resource IDs are 1-indexed (r1, r2, ...)
 
         def next_rid():
             nonlocal _res_counter
@@ -194,6 +199,7 @@ class FCPXMLBuilder:
             "width": str(width),
             "height": str(height),
             "frameDuration": seconds_to_rational(1.0 / sequence_fps, sequence_fps),
+            "colorSpace": "1-1-1 (Rec. 709)",
         }
         if sequence_format_name:
             fmt_attribs["name"] = sequence_format_name
@@ -216,11 +222,23 @@ class FCPXMLBuilder:
                 duration=duration_rational,
                 hasVideo="1",
                 hasAudio="1",
+                audioSources="1",
+                audioChannels="2",
                 format=sequence_format_id,
             )
+
+            # Build file:// URL — remap to client path if provided
+            if self.client_base_path:
+                filename = os.path.basename(video.filepath)
+                base = self.client_base_path.rstrip("/")
+                full_path = f"{base}/{filename}"
+            else:
+                full_path = video.filepath
+
+            media_src = f"file://{url_quote(full_path, safe='/:')}"
             etree.SubElement(asset, "media-rep",
                 kind="original-media",
-                src=f"file://{video.filepath}",
+                src=media_src,
             )
 
         # --- Library / Event / Project ---
@@ -242,7 +260,15 @@ class FCPXMLBuilder:
         spine = etree.SubElement(sequence, "spine")
 
         # --- Add clips to spine ---
-        timeline_offset_frames = 0
+        # Force cut transitions until handle logic is properly implemented.
+        # Transitions require overlapping media handles on adjacent clips;
+        # without that, FCPX rejects the document.
+        effective_transition = self.transition_type if self.transition_type == "cut" else "cut"
+        if effective_transition != self.transition_type:
+            logger.warning(
+                f"Transition '{self.transition_type}' temporarily forced to 'cut' — "
+                "handle logic not yet implemented"
+            )
 
         for idx, cd in enumerate(clips_data):
             clip = cd.get("clip")
@@ -263,7 +289,7 @@ class FCPXMLBuilder:
             clip_name += f" (score: {clip.effective_score:.0f})"
 
             # Add transition before clip (if not first and not "cut")
-            if idx > 0 and self.transition_type != "cut":
+            if idx > 0 and effective_transition != "cut":
                 trans_frames = int(round(self.transition_duration_sec * sequence_exact_fps))
                 trans_ticks = trans_frames * sequence_ticks_per_frame
                 trans_dur = f"{trans_ticks}/{sequence_timebase}s"
@@ -281,23 +307,18 @@ class FCPXMLBuilder:
 
             # Calculate in FRAMES first for alignment, then convert to ticks
             clip_duration_frames = int(round(clip.duration_sec * sequence_exact_fps))
-            offset_frames = timeline_offset_frames
             start_frames = int(round(clip.start_sec * sequence_exact_fps))
 
-            offset_ticks = offset_frames * sequence_ticks_per_frame
             duration_ticks = clip_duration_frames * sequence_ticks_per_frame
             start_ticks = start_frames * sequence_ticks_per_frame
 
             etree.SubElement(spine, "asset-clip",
                 ref=asset_id,
-                offset=f"{offset_ticks}/{sequence_timebase}s",
                 name=clip_name,
                 start=f"{start_ticks}/{sequence_timebase}s",
                 duration=f"{duration_ticks}/{sequence_timebase}s",
                 tcFormat="NDF",
             )
-
-            timeline_offset_frames += clip_duration_frames
 
         # Generate XML string
         doctype = '<!DOCTYPE fcpxml>'

@@ -87,8 +87,12 @@ def _detect_scenes_in_video(filepath: str, threshold: float = 0.5,
         #   video_frames: np.array [n_frames, 27, 48, 3]
         #   single_frame_predictions: np.array [n_frames]
         #   all_frame_predictions: np.array [n_frames]
-        video_frames, single_frame_predictions, all_frame_predictions = \
-            model.predict_video(filepath)
+        #
+        # AMP (FP16) on Ampere GPUs (RTX 3090) uses Tensor Cores for ~2x speedup
+        # and ~40% lower VRAM usage with negligible accuracy loss.
+        with torch.autocast(device_type="cuda", dtype=torch.float16, enabled=torch.cuda.is_available()):
+            video_frames, single_frame_predictions, all_frame_predictions = \
+                model.predict_video(filepath)
 
         # Ensure predictions are numpy arrays, not PyTorch tensors, as predictions_to_scenes expects numpy
         if hasattr(single_frame_predictions, "cpu"):

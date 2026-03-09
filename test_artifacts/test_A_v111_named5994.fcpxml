@@ -2,7 +2,7 @@
 <!DOCTYPE fcpxml>
 <fcpxml version="1.11">
   <resources>
-    <format id="r1" name="FFVideoFormat4K5994" width="3840" height="2160" frameDuration="1001/60000s"/>
+    <format id="r1" name="FFVideoFormat4K5994" width="3840" height="2160" frameDuration="1001/60000s" colorSpace="1-1-1 (Rec. 709)"/>
     <asset id="r2" name="GX010336.MP4" start="0/1s" duration="17922905/60000s" hasVideo="1" hasAudio="1" format="r1">
       <media-rep kind="original-media" src="file:///mnt/nas/gopro/Vail 2026/GX010336.MP4"/>
     </asset>
@@ -10,9 +10,9 @@
   <library>
     <event name="Test A">
       <project name="TestA_v111_named5994">
-        <sequence duration="3003003/60000s" format="r1" tcStart="0/1s" tcFormat="NDF">
+        <sequence duration="3003000/60000s" format="r1" tcStart="0/1s" tcFormat="NDF">
           <spine>
-            <asset-clip ref="r2" offset="0/60000s" name="Clip 01" start="0/60000s" duration="3003003/60000s" tcFormat="NDF"/>
+            <asset-clip ref="r2" offset="0/60000s" name="Clip 01" start="0/60000s" duration="3003000/60000s" tcFormat="NDF"/>
           </spine>
         </sequence>
       </project>

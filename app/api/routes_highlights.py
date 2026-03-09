@@ -1,7 +1,7 @@
 """API routes for Highlight Reel assembly and export."""
 
 import os
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
@@ -111,7 +111,11 @@ async def update_highlight(
 
 
 @router.get("/highlights/{highlight_id}/export/fcpxml")
-async def export_fcpxml(highlight_id: str, db: Session = Depends(get_db)):
+async def export_fcpxml(
+    highlight_id: str,
+    media_path: str = Query(None, description="Local media folder path for FCP relink (e.g. /Volumes/SSD/MyProject/)"),
+    db: Session = Depends(get_db),
+):
     """Generate and download FCPXML file for a highlight reel."""
     reel = db.query(HighlightReel).filter(HighlightReel.id == highlight_id).first()
     if not reel:
@@ -141,6 +145,7 @@ async def export_fcpxml(highlight_id: str, db: Session = Depends(get_db)):
         job_name=job.name,
         transition_type=reel.transition_type,
         transition_duration_sec=reel.transition_duration_sec,
+        client_base_path=media_path,
     )
     xml_content = builder.build(clips_data)
 
